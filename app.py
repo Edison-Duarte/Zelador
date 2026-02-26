@@ -23,6 +23,7 @@ def carregar_historico():
     return None
 
 # --- LÓGICA DE ALERTA SEMANAL ---
+# Verifica a última data no histórico para disparar o alerta
 df_hist_verificacao = carregar_historico()
 if df_hist_verificacao is not None and not df_hist_verificacao.empty:
     ultima_data_str = df_hist_verificacao['Data'].iloc[-1].split(" ")[0]
@@ -35,17 +36,7 @@ if df_hist_verificacao is not None and not df_hist_verificacao.empty:
 aba_inspecao, aba_historico = st.tabs(["📋 Nova Inspeção", "📊 Histórico de Inspeções"])
 
 with aba_inspecao:
-    # --- CABEÇALHO VISUAL (BARCO, TIMÃO E PRÉDIOS) ---
-    col_v1, col_v2, col_v3 = st.columns([1, 2, 1])
-    with col_v2:
-        st.markdown("<h1 style='text-align: center; margin-bottom: 0;'>🚢 ☸️</h1>", unsafe_allow_html=True)
-        col_bl1, col_bl2 = st.columns(2)
-        with col_bl1:
-            st.markdown("<p style='text-align: center; font-size: 40px; margin-bottom: 0;'>🏢</p><p style='text-align: center; font-weight: bold;'>Bloco A</p>", unsafe_allow_html=True)
-        with col_bl2:
-            st.markdown("<p style='text-align: center; font-size: 40px; margin-bottom: 0;'>🏢</p><p style='text-align: center; font-weight: bold;'>Bloco B</p>", unsafe_allow_html=True)
-    
-    st.markdown("<h2 style='text-align: center;'>Sistema Zelador</h2>", unsafe_allow_html=True)
+    st.title("🏢 Sistema de Inspeção: Zelador")
     st.markdown("---")
 
     # --- IDENTIFICAÇÃO ---
@@ -66,12 +57,12 @@ with aba_inspecao:
         for bloco in blocos:
             with st.expander(f"📋 Inspeção - {bloco}", expanded=True):
                 for area in areas:
-                    col_status, col_acao = st.columns([2, 3])
-                    with col_status:
+                    col1, col2 = st.columns([2, 3])
+                    with col1:
                         status = st.radio(f"{area}", ["Conforme", "Não Conforme"], key=f"{bloco}_{area}")
                     
                     if status == "Não Conforme":
-                        with col_acao:
+                        with col2:
                             correcao = st.selectbox(
                                 f"Ação corretiva para {area}:",
                                 ["Limpeza imediata", "Reparo técnico", "Troca de componentes", "Sinalizar área"],
@@ -88,6 +79,7 @@ with aba_inspecao:
         # --- FINALIZAÇÃO ---
         st.markdown("---")
         if st.button("Finalizar e Gerar Relatório"):
+            # Salvar no Histórico
             resumo_status = "OK" if not nao_conformidades else f"{len(nao_conformidades)} Pendências"
             dados_para_salvar = {
                 "Data": data_atual,
@@ -129,8 +121,10 @@ with aba_historico:
     
     if df_hist is not None:
         st.write("Abaixo estão as vistorias realizadas anteriormente:")
+        # Exibe a tabela do histórico
         st.dataframe(df_hist, use_container_width=True)
         
+        # Botão opcional para baixar o CSV
         csv_data = df_hist.to_csv(index=False).encode('utf-8')
         st.download_button(
             label="📥 Baixar Histórico Completo (CSV)",
