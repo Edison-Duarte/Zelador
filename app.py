@@ -1,53 +1,58 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 import urllib.parse
 import os
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="App Zelador", page_icon="🏢")
 
-# --- FUNÇÕES DE PERSISTÊNCIA ---
+# --- FUNÇÕES DE PERSISTÊNCIA (HISTÓRICO) ---
 def salvar_no_historico(dados):
     arquivo = 'historico_zelador.csv'
     df_novo = pd.DataFrame([dados])
     if os.path.exists(arquivo):
-        # Lê o existente para garantir que as colunas batam
-        df_antigo = pd.read_csv(arquivo)
-        df_final = pd.concat([df_antigo, df_novo], ignore_index=True)
-        df_final.to_csv(arquivo, index=False)
+        df_novo.to_csv(arquivo, mode='a', index=False, header=False)
     else:
         df_novo.to_csv(arquivo, index=False)
 
 def carregar_historico():
     arquivo = 'historico_zelador.csv'
     if os.path.exists(arquivo):
-        df = pd.read_csv(arquivo)
-        # Garante que a coluna Detalhes exista para não dar erro em arquivos antigos
-        if "Detalhes" not in df.columns:
-            df["Detalhes"] = "Sem detalhes registrados"
-        return df
+        return pd.read_csv(arquivo)
     return None
+
+def atualizar_arquivo_historico(df):
+    arquivo = 'historico_zelador.csv'
+    df.to_csv(arquivo, index=False)
 
 # --- LÓGICA DE ALERTA SEMANAL ---
 df_hist_verificacao = carregar_historico()
 if df_hist_verificacao is not None and not df_hist_verificacao.empty:
-    try:
-        ultima_data_str = df_hist_verificacao['Data'].iloc[-1].split(" ")[0]
-        ultima_data = datetime.strptime(ultima_data_str, "%d/%m/%Y")
-        dias_passados = (datetime.now() - ultima_data).days
-        if dias_passados >= 7:
-            st.error(f"⚠️ ATENÇÃO: A última vistoria foi realizada há {dias_passados} dias!")
-    except:
-        pass
+    ultima_data_str = df_hist_verificacao['Data'].iloc[-1].split(" ")[0]
+    ultima_data = datetime.strptime(ultima_data_str, "%d/%m/%Y")
+    dias_passados = (datetime.now() - ultima_data).days
+    if dias_passados >= 7:
+        st.error(f"⚠️ ATENÇÃO: A última vistoria foi realizada há {dias_passados} dias!")
 
 # --- INTERFACE EM ABAS ---
 aba_inspecao, aba_historico = st.tabs(["📋 Nova Inspeção", "📊 Histórico de Inspeções"])
 
 with aba_inspecao:
-    st.title("🏢 Sistema de Inspeção: Zelador")
+    # --- CABEÇALHO VISUAL (BARCO, TIMÃO E PRÉDIOS) ---
+    col_v1, col_v2, col_v3 = st.columns([1, 2, 1])
+    with col_v2:
+        st.markdown("<h1 style='text-align: center; margin-bottom: 0;'>🚢 ☸️</h1>", unsafe_allow_html=True)
+        col_bl1, col_bl2 = st.columns(2)
+        with col_bl1:
+            st.markdown("<p style='text-align: center; font-size: 40px; margin-bottom: 0;'>🏢</p><p style='text-align: center; font-weight: bold;'>Bloco A</p>", unsafe_allow_html=True)
+        with col_bl2:
+            st.markdown("<p style='text-align: center; font-size: 40px; margin-bottom: 0;'>🏢</p><p style='text-align: center; font-weight: bold;'>Bloco B</p>", unsafe_allow_html=True)
+    
+    st.markdown("<h2 style='text-align: center;'>Sistema Zelador</h2>", unsafe_allow_html=True)
     st.markdown("---")
 
+    # --- IDENTIFICAÇÃO ---
     st.subheader("1. Identificação")
     inspetor = st.text_input("Nome do Responsável pela Inspeção:")
     data_atual = datetime.now().strftime("%d/%m/%Y %H:%M")
@@ -55,6 +60,7 @@ with aba_inspecao:
     if not inspetor:
         st.info("Por favor, identifique-se para começar.")
     else:
+        # --- FORMULÁRIO DE INSPEÇÃO ---
         areas = ["Recepção", "Elevadores", "Escadarias", "Corredores", "Corrimões", "Janelas"]
         blocos = ["Bloco A", "Bloco B"]
         nao_conformidades = []
@@ -64,12 +70,12 @@ with aba_inspecao:
         for bloco in blocos:
             with st.expander(f"📋 Inspeção - {bloco}", expanded=True):
                 for area in areas:
-                    col1, col2 = st.columns([2, 3])
-                    with col1:
+                    col_status, col_acao = st.columns([2, 3])
+                    with col_status:
                         status = st.radio(f"{area}", ["Conforme", "Não Conforme"], key=f"{bloco}_{area}")
                     
                     if status == "Não Conforme":
-                        with col2:
+                        with col_acao:
                             correcao = st.selectbox(
                                 f"Ação corretiva para {area}:",
                                 ["Limpeza imediata", "Reparo técnico", "Troca de componentes", "Sinalizar área"],
@@ -77,69 +83,100 @@ with aba_inspecao:
                             )
                             obs = st.text_input(f"Obs ({area}):", key=f"obs_{bloco}_{area}")
                             nao_conformidades.append({
-                                "Bloco": bloco, "Local": area, "Problema": obs if obs else "Não especificado", "Ação": correcao
+                                "Bloco": bloco,
+                                "Local": area,
+                                "Problema": obs if obs else "Não especificado",
+                                "Ação": correcao
                             })
 
+        # --- FINALIZAÇÃO ---
         st.markdown("---")
         if st.button("Finalizar e Gerar Relatório"):
-            if nao_conformidades:
-                detalhes_texto = " | ".join([f"[{n['Bloco']}] {n['Local']}: {n['Problema']} (Ação: {n['Ação']})" for n in nao_conformidades])
-                resumo_status = f"🔴 {len(nao_conformidades)} Pendência(s)"
-            else:
-                detalhes_texto = "Tudo em conformidade."
-                resumo_status = "✅ OK"
-
+            resumo_status = "OK" if not nao_conformidades else f"{len(nao_conformidades)} Pendências"
             dados_para_salvar = {
                 "Data": data_atual,
                 "Inspetor": inspetor,
-                "Status": resumo_status,
-                "Detalhes": detalhes_texto
+                "Status": resumo_status
             }
             salvar_no_historico(dados_para_salvar)
-            st.success("Inspeção Concluída!")
-            st.rerun()
+            
+            st.success("Inspeção Concluída e Salva no Histórico!")
+            
+            # Gerar texto do relatório
+            relatorio_texto = f"RELATÓRIO DE INSPEÇÃO - ZELADOR\n"
+            relatorio_texto += f"Data: {data_atual}\n"
+            relatorio_texto += f"Responsável: {inspetor}\n"
+            relatorio_texto += "----------------------------\n"
+            
+            if nao_conformidades:
+                relatorio_texto += "🚨 NÃO CONFORMIDADES ENCONTRADAS:\n"
+                for item in nao_conformidades:
+                    relatorio_texto += f"- {item['Bloco']} | {item['Local']}: {item['Problema']} (Ação: {item['Ação']})\n"
+            else:
+                relatorio_texto += "✅ Tudo em conformidade!"
+
+            st.text_area("Prévia do Relatório", relatorio_texto, height=200)
+
+            # --- BOTÕES DE ENVIO ---
+            msg_whatsapp = urllib.parse.quote(relatorio_texto)
+            url_whatsapp = f"https://api.whatsapp.com/send?text={msg_whatsapp}"
+            
+            col_w, col_e = st.columns(2)
+            with col_w:
+                st.link_button("📲 WhatsApp (Escolher Contato)", url_whatsapp)
+            with col_e:
+                st.link_button("📧 Enviar via E-mail", f"mailto:?subject=Relatorio_Zelador&body={msg_whatsapp}")
 
 with aba_historico:
     st.title("📊 Histórico de Inspeções")
     df_hist = carregar_historico()
     
-    if df_hist is not None:
-        st.write("💡 **Selecione uma linha** para ver os detalhes:")
-        
-        # Mostra apenas colunas principais
-        colunas_v = ["Data", "Inspetor", "Status"]
-        
-        # O pulo do gato: seleção de linha
-        selecao = st.dataframe(
-            df_hist[colunas_v], 
-            use_container_width=True, 
-            hide_index=True,
-            on_select="rerun",
-            selection_mode="single-row"
-        )
-
-        # Se houver linha selecionada, mostra os detalhes
-        if len(selecao.selection.rows) > 0:
-            idx = selecao.selection.rows[0]
-            linha = df_hist.iloc[idx]
-            
-            st.info(f"🔍 **Detalhes da Inspeção ({linha['Data']})**")
-            detalhes = linha['Detalhes'].split(" | ")
-            for item in detalhes:
-                st.write(f"• {item}")
+    if df_hist is not None and not df_hist.empty:
+        st.dataframe(df_hist, use_container_width=True)
         
         st.markdown("---")
+        # --- BOTÃO EDITAR COM SENHA ---
+        with st.expander("📝 Editar Histórico (Requer Senha)"):
+            senha = st.text_input("Digite a senha para habilitar a edição:", type="password")
+            
+            if senha == "flats":
+                st.success("Acesso liberado!")
+                
+                # Opção 1: Apagar registros selecionados
+                st.subheader("Apagar Registros")
+                registros_para_apagar = st.multiselect(
+                    "Selecione as inspeções que deseja remover:",
+                    options=df_hist.index,
+                    format_func=lambda x: f"{df_hist.iloc[x]['Data']} - {df_hist.iloc[x]['Inspetor']}"
+                )
+                
+                if st.button("❌ Apagar Selecionados"):
+                    if registros_para_apagar:
+                        df_hist = df_hist.drop(registros_para_apagar)
+                        atualizar_arquivo_historico(df_hist)
+                        st.rerun()
+                    else:
+                        st.warning("Selecione ao menos um item.")
+
+                st.markdown("---")
+                # Opção 2: Apagar tudo
+                st.subheader("Zona de Perigo")
+                if st.button("🚨 APAGAR TODAS AS INSPEÇÕES"):
+                    # Cria um dataframe vazio com as mesmas colunas para "resetar" o arquivo
+                    df_vazio = pd.DataFrame(columns=["Data", "Inspetor", "Status"])
+                    atualizar_arquivo_historico(df_vazio)
+                    st.rerun()
+                    
+            elif senha != "":
+                st.error("Senha incorreta.")
+
         # Botão de download
         csv_data = df_hist.to_csv(index=False).encode('utf-8')
-        st.download_button(label="📥 Baixar CSV", data=csv_data, file_name='historico.csv', mime='text/csv')
-
-        # --- GERENCIAMENTO (SENHA) ---
-        st.subheader("🛠️ Gerenciar Registros")
-        senha = st.text_input("Senha para excluir:", type="password")
-        if senha == "flats":
-            if st.button("🚨 LIMPAR TODO O HISTÓRICO"):
-                if os.path.exists('historico_zelador.csv'):
-                    os.remove('historico_zelador.csv')
-                    st.rerun()
+        st.download_button(
+            label="📥 Baixar Histórico Completo (CSV)",
+            data=csv_data,
+            file_name='historico_zelador.csv',
+            mime='text/csv',
+        )
     else:
-        st.info("Ainda não existem inspeções registradas.")
+        st.info("Ainda não existem inspeções registradas no histórico.")
