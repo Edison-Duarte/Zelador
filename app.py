@@ -8,58 +8,74 @@ import os
 st.set_page_config(page_title="App Zelador", page_icon="🏢")
 
 # --- FUNÇÕES DE PERSISTÊNCIA ---
-def salvar_no_historico(dados, detalhes=None):
-    # Salva o resumo
+def salvar_no_historico(dados, lista_pendencias):
     arquivo_hist = 'historico_zelador.csv'
-    pd.DataFrame([dados]).to_csv(arquivo_hist, mode='a', index=False, header=not os.path.exists(arquivo_hist))
+    arquivo_det = 'detalhes_zelador.csv'
     
-    # Salva os detalhes (se houver pendências)
-    if detalhes:
-        arquivo_det = 'detalhes_inspecao.csv'
-        df_det = pd.DataFrame(detalhes)
-        df_det['ID_Inspecao'] = dados['Data']  # Vincula pelo carimbo de data/hora
+    # Salva Resumo
+    df_novo = pd.DataFrame([dados])
+    df_novo.to_csv(arquivo_hist, mode='a', index=False, header=not os.path.exists(arquivo_hist))
+    
+    # Salva Detalhes (vinculados pela data/hora exata)
+    if lista_pendencias:
+        df_det = pd.DataFrame(lista_pendencias)
+        df_det['id_inspecao'] = dados['Data']
         df_det.to_csv(arquivo_det, mode='a', index=False, header=not os.path.exists(arquivo_det))
 
 def carregar_historico():
     if os.path.exists('historico_zelador.csv'):
-        return pd.read_csv(arquivo_hist := 'historico_zelador.csv')
+        return pd.read_csv('historico_zelador.csv')
     return None
 
 def carregar_detalhes(id_inspecao):
-    if os.path.exists('detalhes_inspecao.csv'):
-        df = pd.read_csv('detalhes_inspecao.csv')
-        return df[df['ID_Inspecao'] == id_inspecao]
+    if os.path.exists('detalhes_zelador.csv'):
+        df = pd.read_csv('detalhes_zelador.csv')
+        return df[df['id_inspecao'] == id_inspecao]
     return None
+
+# --- LÓGICA DE ALERTA SEMANAL ---
+df_hist_verificacao = carregar_historico()
+if df_hist_verificacao is not None and not df_hist_verificacao.empty:
+    ultima_data_str = df_hist_verificacao['Data'].iloc[-1].split(" ")[0]
+    ultima_data = datetime.strptime(ultima_data_str, "%d/%m/%Y")
+    dias_passados = (datetime.now() - ultima_data).days
+    if dias_passados >= 7:
+        st.error(f"⚠️ ATENÇÃO: A última vistoria foi realizada há {dias_passados} dias!")
 
 # --- INTERFACE EM ABAS ---
 aba_inspecao, aba_historico = st.tabs(["📋 Nova Inspeção", "📊 Histórico de Inspeções"])
 
 with aba_inspecao:
     st.title("🏢 Sistema de Inspeção: Zelador")
+    st.markdown("---")
+    st.subheader("1. Identificação")
     inspetor = st.text_input("Nome do Responsável pela Inspeção:")
     data_atual = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
 
     if not inspetor:
-        st.info("Por favor, identifique-se.")
+        st.info("Por favor, identifique-se para começar.")
     else:
         areas = ["Recepção", "Elevadores", "Escadarias", "Corredores", "Corrimões", "Janelas"]
         blocos = ["Bloco A", "Bloco B"]
         nao_conformidades = []
 
+        st.subheader("2. Checklist de Áreas Comuns")
         for bloco in blocos:
             with st.expander(f"📋 Inspeção - {bloco}", expanded=True):
                 for area in areas:
                     col1, col2 = st.columns([2, 3])
-                    status = col1.radio(f"{area}", ["Conforme", "Não Conforme"], key=f"{bloco}_{area}")
+                    with col1:
+                        status = st.radio(f"{area}", ["Conforme", "Não Conforme"], key=f"{bloco}_{area}")
                     if status == "Não Conforme":
-                        correcao = col2.selectbox(f"Ação:", ["Limpeza imediata", "Reparo técnico", "Troca", "Sinalizar"], key=f"corr_{bloco}_{area}")
-                        obs = col2.text_input(f"Obs:", key=f"obs_{bloco}_{area}")
-                        nao_conformidades.append({"Bloco": bloco, "Local": area, "Problema": obs if obs else "Não especificado", "Ação": correcao})
+                        with col2:
+                            correcao = st.selectbox(f"Ação para {area}:", ["Limpeza imediata", "Reparo técnico", "Troca", "Sinalizar"], key=f"corr_{bloco}_{area}")
+                            obs = st.text_input(f"Obs ({area}):", key=f"obs_{bloco}_{area}")
+                            nao_conformidades.append({"Bloco": bloco, "Local": area, "Problema": obs if obs else "Não especificado", "Ação": correcao})
 
         if st.button("Finalizar e Gerar Relatório"):
             resumo_status = "OK" if not nao_conformidades else f"{len(nao_conformidades)} Pendências"
-            dados_resumo = {"Data": data_atual, "Inspetor": inspetor, "Status": resumo_status}
-            salvar_no_historico(dados_resumo, nao_conformidades)
+            dados_salvar = {"Data": data_atual, "Inspetor": inspetor, "Status": resumo_status}
+            salvar_no_historico(dados_salvar, nao_conformidades)
             st.success("Inspeção Salva!")
             st.rerun()
 
@@ -68,9 +84,10 @@ with aba_historico:
     df_hist = carregar_historico()
     
     if df_hist is not None:
-        st.write("### 1. Selecione uma linha para ver detalhes")
-        # Seleção de linha
-        selecao = st.dataframe(
+        st.info("💡 Clique em uma linha da tabela para ver os detalhes das pendências abaixo.")
+        
+        # Tabela interativa com seleção de linha
+        evento_selecao = st.dataframe(
             df_hist, 
             use_container_width=True, 
             hide_index=True, 
@@ -78,40 +95,41 @@ with aba_historico:
             selection_mode="single-row"
         )
 
-        # Exibir detalhes se uma linha for selecionada
-        if len(selecao.selection.rows) > 0:
-            idx = selecao.selection.rows[0]
-            linha_selecionada = df_hist.iloc[idx]
+        # Exibir detalhes se houver seleção
+        selecionado = evento_selecao.get("selection", {}).get("rows", [])
+        if selecionado:
+            idx = selecionado[0]
+            linha = df_hist.iloc[idx]
+            st.markdown(f"### 🔍 Detalhes: {linha['Data']}")
             
-            st.markdown(f"### 🔍 Detalhes da Inspeção ({linha_selecionada['Data']})")
-            
-            if "Pendências" in linha_selecionada['Status']:
-                detalhes = carregar_detalhes(linha_selecionada['Data'])
+            if "Pendências" in str(linha['Status']):
+                detalhes = carregar_detalhes(linha['Data'])
                 if detalhes is not None and not detalhes.empty:
-                    for _, det in detalhes.iterrows():
-                        with st.chat_message("assistant"):
-                            st.write(f"**{det['Bloco']} - {det['Local']}**")
-                            st.write(f"⚠️ Problema: {det['Problema']}")
-                            st.write(f"🛠️ Ação: {det['Ação']}")
+                    for _, row in detalhes.iterrows():
+                        st.warning(f"**{row['Bloco']} - {row['Local']}**\n\n* **Problema:** {row['Problema']}\n* **Ação:** {row['Ação']}")
                 else:
-                    st.warning("Detalhes não encontrados para este registro antigo.")
+                    st.write("Detalhes detalhados não encontrados para este registro.")
             else:
-                st.success("✅ Esta inspeção não apresentou pendências.")
+                st.success("✅ Nenhuma pendência registrada nesta vistoria.")
 
         st.markdown("---")
-        # --- ÁREA DE GERENCIAMENTO (SENHA) ---
-        with st.expander("🛠️ Gerenciar Registros (Apagar)"):
-            senha = st.text_input("Senha:", type="password")
+        with st.expander("🛠️ Gerenciar Registros (Senha: flats)"):
+            senha = st.text_input("Senha para gerenciar:", type="password")
             if senha == "flats":
                 df_editor = df_hist.copy()
-                df_editor.insert(0, "Apagar", False)
-                tabela_edicao = st.data_editor(df_editor, hide_index=True, use_container_width=True)
+                df_editor.insert(0, "Selecionar", False)
+                edicao = st.data_editor(df_editor, hide_index=True, use_container_width=True)
                 
-                if st.button("🗑️ Confirmar Exclusão"):
-                    manter = tabela_edicao[tabela_edicao["Apagar"] == False].drop(columns=["Apagar"])
-                    if manter.empty:
+                col_del1, col_del2 = st.columns(2)
+                with col_del1:
+                    if st.button("🗑️ Apagar Selecionados"):
+                        df_final = edicao[edicao["Selecionar"] == False].drop(columns=["Selecionar"])
+                        df_final.to_csv('historico_zelador.csv', index=False)
+                        st.rerun()
+                with col_del2:
+                    if st.button("🚨 APAGAR TUDO"):
                         if os.path.exists('historico_zelador.csv'): os.remove('historico_zelador.csv')
-                        if os.path.exists('detalhes_inspecao.csv'): os.remove('detalhes_inspecao.csv')
-                    else:
-                        manter.to_csv('historico_zelador.csv', index=False)
-                    st.rerun()
+                        if os.path.exists('detalhes_zelador.csv'): os.remove('detalhes_zelador.csv')
+                        st.rerun()
+    else:
+        st.info("Ainda não existem inspeções registradas.")
