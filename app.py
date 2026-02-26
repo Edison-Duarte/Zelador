@@ -116,68 +116,66 @@ with aba_historico:
     df_hist = carregar_historico()
     
     if df_hist is not None:
-        # Botão para baixar o CSV (mantido no topo para facilidade)
+        # 1. VISUALIZAÇÃO SEMPRE ATIVA
+        st.write("Visualização das vistorias registradas:")
+        st.dataframe(df_hist, use_container_width=True, hide_index=True)
+        
+        # Botão de download
         csv_data = df_hist.to_csv(index=False).encode('utf-8')
         st.download_button(label="📥 Baixar CSV", data=csv_data, file_name='historico.csv', mime='text/csv')
 
         st.markdown("---")
         
-        # --- ÁREA DE EDIÇÃO DINÂMICA ---
-        with st.expander("🛠️ Modo de Edição e Exclusão (Senha Necessária)"):
-            senha = st.text_input("Digite a senha para gerenciar:", type="password")
+        # 2. ÁREA DE GERENCIAMENTO (ABAIXO DO HISTÓRICO)
+        st.subheader("🛠️ Gerenciar Registros")
+        senha = st.text_input("Para excluir registros, digite a senha:", type="password")
+        
+        if senha == "flats":
+            st.info("Selecione as inspeções que deseja apagar no editor abaixo:")
             
-            if senha == "flats":
-                st.info("Selecione as linhas que deseja remover ou use o checkbox no topo da coluna para marcar todas.")
-                
-                # Adiciona uma coluna de seleção temporária
-                df_com_selecao = df_hist.copy()
-                df_com_selecao.insert(0, "Selecionar para Apagar", False)
-                
-                # Interface de edição dinâmica
-                edicao = st.data_editor(
-                    df_com_selecao,
-                    hide_index=True,
-                    use_container_width=True,
-                    column_config={
-                        "Selecionar para Apagar": st.column_config.CheckboxColumn(
-                            "❌",
-                            help="Marque para apagar",
-                            default=False,
-                        )
-                    },
-                    disabled=["Data", "Inspetor", "Status"] # Impede editar o conteúdo, apenas o checkbox
-                )
-                
-                # Lógica de Exclusão
-                col_del1, col_del2 = st.columns(2)
-                
-                with col_del1:
-                    if st.button("🗑️ Apagar Selecionados"):
-                        # Filtra apenas o que NÃO foi selecionado
-                        linhas_restantes = edicao[edicao["Selecionar para Apagar"] == False]
-                        # Remove a coluna temporária de seleção antes de salvar
-                        df_final = linhas_restantes.drop(columns=["Selecionar para Apagar"])
-                        
-                        if len(df_final) == 0:
-                            if os.path.exists('historico_zelador.csv'):
-                                os.remove('historico_zelador.csv')
-                        else:
-                            df_final.to_csv('historico_zelador.csv', index=False)
-                        
-                        st.success("Alterações salvas!")
-                        st.rerun()
-                
-                with col_del2:
-                    if st.button("🚨 APAGAR TUDO"):
+            # Prepara o DataFrame com a coluna de checkbox
+            df_editor = df_hist.copy()
+            df_editor.insert(0, "Selecionar", False)
+            
+            # Editor interativo para exclusão
+            tabela_edicao = st.data_editor(
+                df_editor,
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    "Selecionar": st.column_config.CheckboxColumn(
+                        "Apagar?",
+                        help="Marque para excluir este registro",
+                        default=False,
+                    )
+                },
+                disabled=["Data", "Inspetor", "Status"]
+            )
+            
+            col_b1, col_b2 = st.columns(2)
+            with col_b1:
+                if st.button("🗑️ Apagar Selecionados"):
+                    # Filtra os dados: mantém apenas o que NÃO foi marcado para apagar
+                    df_final = tabela_edicao[tabela_edicao["Selecionar"] == False].drop(columns=["Selecionar"])
+                    
+                    if df_final.empty:
                         if os.path.exists('historico_zelador.csv'):
                             os.remove('historico_zelador.csv')
-                            st.rerun()
-
-            elif senha != "":
-                st.error("Senha incorreta!")
-            else:
-                # Exibição padrão quando não há senha (apenas leitura)
-                st.dataframe(df_hist, use_container_width=True, hide_index=True)
-
+                    else:
+                        df_final.to_csv('historico_zelador.csv', index=False)
+                    
+                    st.success("Registros atualizados!")
+                    st.rerun()
+            
+            with col_b2:
+                if st.button("🚨 LIMPAR TODO O HISTÓRICO"):
+                    if os.path.exists('historico_zelador.csv'):
+                        os.remove('historico_zelador.csv')
+                        st.warning("Histórico completamente removido.")
+                        st.rerun()
+        
+        elif senha != "":
+            st.error("Senha incorreta!")
+            
     else:
         st.info("Ainda não existem inspeções registradas no histórico.")
