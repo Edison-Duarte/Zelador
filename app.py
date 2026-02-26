@@ -2,99 +2,84 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
 import urllib.parse
+import os
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="App Zelador", page_icon="🏢")
+st.set_page_config(page_title="Zelador Pro", page_icon="🏢")
 
-# --- SIMULAÇÃO DE BANCO DE DATAS (Em um app real, viria de um CSV ou SQL) ---
-# Simulando que a última vistoria foi há 8 dias para testar o alerta
-if 'ultima_vistoria' not in st.session_state:
-    st.session_state['ultima_vistoria'] = datetime.now() - timedelta(days=8)
+# --- FUNÇÕES DE HISTÓRICO ---
+def salvar_no_csv(dados):
+    arquivo = 'historico_inspecoes.csv'
+    df_novo = pd.DataFrame([dados])
+    if os.path.exists(arquivo):
+        df_novo.to_csv(arquivo, mode='a', index=False, header=False)
+    else:
+        df_novo.to_csv(arquivo, index=False)
+
+def carregar_historico():
+    arquivo = 'historico_inspecoes.csv'
+    if os.path.exists(arquivo):
+        return pd.read_csv(arquivo)
+    return None
 
 # --- LÓGICA DE ALERTA SEMANAL ---
-dias_passados = (datetime.now() - st.session_state['ultima_vistoria']).days
+hist = carregar_historico()
+if hist is not None and not hist.empty:
+    ultima_data_str = hist['Data'].iloc[-1].split(" ")[0]
+    ultima_data = datetime.strptime(ultima_data_str, "%d/%m/%Y")
+    dias_passados = (datetime.now() - ultima_data).days
+    if dias_passados >= 7:
+        st.error(f"⚠️ ATENÇÃO: A última vistoria foi há {dias_passados} dias!")
 
-if dias_passados >= 7:
-    st.error(f"⚠️ ATENÇÃO: A última vistoria foi realizada há {dias_passados} dias. É necessário realizar uma nova inspeção semanal!")
+# --- INTERFACE EM ABAS ---
+aba_nova, aba_hist = st.tabs(["📋 Nova Inspeção", "📊 Consultar Histórico"])
 
-st.title("🏢 Sistema de Inspeção: Zelador")
-st.markdown("---")
-
-# --- IDENTIFICAÇÃO ---
-st.subheader("1. Identificação")
-inspetor = st.text_input("Nome do Responsável pela Inspeção:")
-data_atual = datetime.now().strftime("%d/%m/%Y %H:%M")
-
-if not inspetor:
-    st.info("Por favor, identifique-se para começar.")
-    st.stop()
-
-# --- FORMULÁRIO DE INSPEÇÃO ---
-areas = ["Recepção", "Elevadores", "Escadarias", "Corredores", "Corrimões", "Janelas"]
-blocos = ["Bloco A", "Bloco B"]
-nao_conformidades = []
-
-st.subheader("2. Checklist de Áreas Comuns")
-
-for bloco in blocos:
-    with st.expander(f"📋 Inspeção - {bloco}", expanded=True):
-        for area in areas:
-            col1, col2 = st.columns([2, 3])
-            
-            with col1:
-                status = st.radio(f"{area}", ["Conforme", "Não Conforme"], key=f"{bloco}_{area}")
-            
-            if status == "Não Conforme":
-                with col2:
-                    correcao = st.selectbox(
-                        f"Ação corretiva para {area}:",
-                        ["Limpeza imediata", "Reparo técnico", "Troca de componentes", "Sinalizar área"],
-                        key=f"corr_{bloco}_{area}"
-                    )
-                    obs = st.text_input(f"Obs ({area}):", key=f"obs_{bloco}_{area}")
-                    nao_conformidades.append({
-                        "Bloco": bloco,
-                        "Local": area,
-                        "Problema": obs if obs else "Não especificado",
-                        "Ação": correcao
-                    })
-
-# --- GERAÇÃO DE RELATÓRIO ---
-st.markdown("---")
-if st.button("Finalizar e Gerar Relatório"):
-    st.success("Inspeção Concluída!")
+with aba_nova:
+    st.title("Inspeção de Áreas Comuns")
     
-    # Criar Resumo
-    relatorio_texto = f"RELATÓRIO DE INSPEÇÃO - ZELADOR\n"
-    relatorio_texto += f"Data: {data_atual}\n"
-    relatorio_texto += f"Responsável: {inspetor}\n"
-    relatorio_texto += "----------------------------\n"
-    
-    if nao_conformidades:
-        relatorio_texto += "🚨 NÃO CONFORMIDADES ENCONTRADAS:\n"
-        for item in nao_conformidades:
-            relatorio_texto += f"- {item['Bloco']} | {item['Local']}: {item['Problema']} (Ação: {item['Ação']})\n"
+    # 1. Identificação
+    inspetor = st.text_input("Nome do Inspetor:")
+    data_atual = datetime.now().strftime("%d/%m/%Y %H:%M")
+
+    if inspetor:
+        # 2. Checklist
+        areas = ["Recepção", "Elevadores", "Escadarias", "Corredores", "Corrimões", "Janelas"]
+        blocos = ["Bloco A", "Bloco B"]
+        nao_conformidades = []
+
+        for bloco in blocos:
+            with st.expander(f"Vistoria {bloco}"):
+                for area in areas:
+                    res = st.radio(f"{area} ({bloco})", ["Conforme", "Não Conforme"], key=f"{bloco}_{area}")
+                    if res == "Não Conforme":
+                        acao = st.selectbox(f"Ação para {area}:", ["Limpeza", "Reparo", "Troca"], key=f"ac_{bloco}_{area}")
+                        nao_conformidades.append(f"{bloco}-{area} ({acao})")
+
+        # 3. Finalização
+        if st.button("Finalizar e Enviar"):
+            status_geral = "OK" if not nao_conformidades else f"{len(nao_conformidades)} Pendências"
+            
+            # Salvar no histórico
+            dados = {"Data": data_atual, "Inspetor": inspetor, "Resultado": status_geral}
+            salvar_no_csv(dados)
+
+            # Gerar texto para WhatsApp
+            relatorio = f"*RELATÓRIO ZELADOR*\nData: {data_atual}\nInspetor: {inspetor}\nStatus: {status_geral}\n"
+            if nao_conformidades:
+                relatorio += "\n*Problemas:* " + ", ".join(nao_conformidades)
+            
+            url_wa = f"https://api.whatsapp.com/send?text={urllib.parse.quote(relatorio)}"
+            
+            st.success("Inspeção salva com sucesso!")
+            st.link_button("📲 Enviar via WhatsApp", url_wa)
     else:
-        relatorio_texto += "✅ Tudo em conformidade!"
+        st.info("Digite seu nome para iniciar.")
 
-    st.text_area("Prévia do Relatório", relatorio_texto, height=200)
-
-    # --- BOTÕES DE ENVIO ---
-    msg_whatsapp = urllib.parse.quote(relatorio_texto)
-    
-    # URL SEM NÚMERO (Abre a lista de contatos do WhatsApp)
-    url_whatsapp_aberta = f"https://api.whatsapp.com/send?text={msg_whatsapp}"
-    
-    col_w, col_e = st.columns(2)
-    
-    with col_w:
-        # Botão estilizado para o WhatsApp
-        st.link_button("📲 Enviar via WhatsApp (Escolher Contato)", url_whatsapp_aberta)
-    
-    with col_e:
-        # Link para E-mail (Opcional: você pode deixar o campo de e-mail vazio para o usuário preencher no app de e-mail)
-        st.link_button("📧 Enviar via E-mail", f"mailto:?subject=Relatorio_Zelador&body={msg_whatsapp}")
-    
-    # Atualiza a data da última vistoria no sistema
-    st.session_state['ultima_vistoria'] = datetime.now()
+with aba_hist:
+    st.header("Histórico de Vistorias")
+    dados_h = carregar_historico()
+    if dados_h is not None:
+        st.dataframe(dados_h, use_container_width=True)
+    else:
+        st.write("Nenhum registro encontrado.")
 
