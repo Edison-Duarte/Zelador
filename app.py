@@ -1,36 +1,25 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 import urllib.parse
 import os
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="App Zelador", page_icon="🏢")
 
-# --- FUNÇÕES DE PERSISTÊNCIA ---
-def salvar_no_historico(dados, lista_pendencias):
-    arquivo_hist = 'historico_zelador.csv'
-    arquivo_det = 'detalhes_zelador.csv'
-    
-    # Salva Resumo
+# --- FUNÇÕES DE PERSISTÊNCIA (HISTÓRICO) ---
+def salvar_no_historico(dados):
+    arquivo = 'historico_zelador.csv'
     df_novo = pd.DataFrame([dados])
-    df_novo.to_csv(arquivo_hist, mode='a', index=False, header=not os.path.exists(arquivo_hist))
-    
-    # Salva Detalhes (vinculados pela data/hora exata)
-    if lista_pendencias:
-        df_det = pd.DataFrame(lista_pendencias)
-        df_det['id_inspecao'] = dados['Data']
-        df_det.to_csv(arquivo_det, mode='a', index=False, header=not os.path.exists(arquivo_det))
+    if os.path.exists(arquivo):
+        df_novo.to_csv(arquivo, mode='a', index=False, header=False)
+    else:
+        df_novo.to_csv(arquivo, index=False)
 
 def carregar_historico():
-    if os.path.exists('historico_zelador.csv'):
-        return pd.read_csv('historico_zelador.csv')
-    return None
-
-def carregar_detalhes(id_inspecao):
-    if os.path.exists('detalhes_zelador.csv'):
-        df = pd.read_csv('detalhes_zelador.csv')
-        return df[df['id_inspecao'] == id_inspecao]
+    arquivo = 'historico_zelador.csv'
+    if os.path.exists(arquivo):
+        return pd.read_csv(arquivo)
     return None
 
 # --- LÓGICA DE ALERTA SEMANAL ---
@@ -48,88 +37,145 @@ aba_inspecao, aba_historico = st.tabs(["📋 Nova Inspeção", "📊 Histórico 
 with aba_inspecao:
     st.title("🏢 Sistema de Inspeção: Zelador")
     st.markdown("---")
+
+    # --- IDENTIFICAÇÃO ---
     st.subheader("1. Identificação")
     inspetor = st.text_input("Nome do Responsável pela Inspeção:")
-    data_atual = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    data_atual = datetime.now().strftime("%d/%m/%Y %H:%M")
 
     if not inspetor:
         st.info("Por favor, identifique-se para começar.")
     else:
+        # --- FORMULÁRIO DE INSPEÇÃO ---
         areas = ["Recepção", "Elevadores", "Escadarias", "Corredores", "Corrimões", "Janelas"]
         blocos = ["Bloco A", "Bloco B"]
         nao_conformidades = []
 
         st.subheader("2. Checklist de Áreas Comuns")
+
         for bloco in blocos:
             with st.expander(f"📋 Inspeção - {bloco}", expanded=True):
                 for area in areas:
                     col1, col2 = st.columns([2, 3])
                     with col1:
                         status = st.radio(f"{area}", ["Conforme", "Não Conforme"], key=f"{bloco}_{area}")
+                    
                     if status == "Não Conforme":
                         with col2:
-                            correcao = st.selectbox(f"Ação para {area}:", ["Limpeza imediata", "Reparo técnico", "Troca", "Sinalizar"], key=f"corr_{bloco}_{area}")
+                            correcao = st.selectbox(
+                                f"Ação corretiva para {area}:",
+                                ["Limpeza imediata", "Reparo técnico", "Troca de componentes", "Sinalizar área"],
+                                key=f"corr_{bloco}_{area}"
+                            )
                             obs = st.text_input(f"Obs ({area}):", key=f"obs_{bloco}_{area}")
-                            nao_conformidades.append({"Bloco": bloco, "Local": area, "Problema": obs if obs else "Não especificado", "Ação": correcao})
+                            nao_conformidades.append({
+                                "Bloco": bloco,
+                                "Local": area,
+                                "Problema": obs if obs else "Não especificado",
+                                "Ação": correcao
+                            })
 
+        # --- FINALIZAÇÃO ---
+        st.markdown("---")
         if st.button("Finalizar e Gerar Relatório"):
             resumo_status = "OK" if not nao_conformidades else f"{len(nao_conformidades)} Pendências"
-            dados_salvar = {"Data": data_atual, "Inspetor": inspetor, "Status": resumo_status}
-            salvar_no_historico(dados_salvar, nao_conformidades)
-            st.success("Inspeção Salva!")
-            st.rerun()
+            dados_para_salvar = {
+                "Data": data_atual,
+                "Inspetor": inspetor,
+                "Status": resumo_status
+            }
+            salvar_no_historico(dados_para_salvar)
+            
+            st.success("Inspeção Concluída e Salva no Histórico!")
+            
+            relatorio_texto = f"RELATÓRIO DE INSPEÇÃO - ZELADOR\n"
+            relatorio_texto += f"Data: {data_atual}\n"
+            relatorio_texto += f"Responsável: {inspetor}\n"
+            relatorio_texto += "----------------------------\n"
+            
+            if nao_conformidades:
+                relatorio_texto += "🚨 NÃO CONFORMIDADES ENCONTRADAS:\n"
+                for item in nao_conformidades:
+                    relatorio_texto += f"- {item['Bloco']} | {item['Local']}: {item['Problema']} (Ação: {item['Ação']})\n"
+            else:
+                relatorio_texto += "✅ Tudo em conformidade!"
+
+            st.text_area("Prévia do Relatório", relatorio_texto, height=200)
+
+            msg_whatsapp = urllib.parse.quote(relatorio_texto)
+            url_whatsapp = f"https://api.whatsapp.com/send?text={msg_whatsapp}"
+            
+            col_w, col_e = st.columns(2)
+            with col_w:
+                st.link_button("📲 WhatsApp (Escolher Contato)", url_whatsapp)
+            with col_e:
+                st.link_button("📧 Enviar via E-mail", f"mailto:?subject=Relatorio_Zelador&body={msg_whatsapp}")
 
 with aba_historico:
     st.title("📊 Histórico de Inspeções")
     df_hist = carregar_historico()
     
     if df_hist is not None:
-        st.info("💡 Clique em uma linha da tabela para ver os detalhes das pendências abaixo.")
+        # 1. VISUALIZAÇÃO SEMPRE ATIVA
+        st.write("Visualização das vistorias registradas:")
+        st.dataframe(df_hist, use_container_width=True, hide_index=True)
         
-        # Tabela interativa com seleção de linha
-        evento_selecao = st.dataframe(
-            df_hist, 
-            use_container_width=True, 
-            hide_index=True, 
-            on_select="rerun", 
-            selection_mode="single-row"
-        )
-
-        # Exibir detalhes se houver seleção
-        selecionado = evento_selecao.get("selection", {}).get("rows", [])
-        if selecionado:
-            idx = selecionado[0]
-            linha = df_hist.iloc[idx]
-            st.markdown(f"### 🔍 Detalhes: {linha['Data']}")
-            
-            if "Pendências" in str(linha['Status']):
-                detalhes = carregar_detalhes(linha['Data'])
-                if detalhes is not None and not detalhes.empty:
-                    for _, row in detalhes.iterrows():
-                        st.warning(f"**{row['Bloco']} - {row['Local']}**\n\n* **Problema:** {row['Problema']}\n* **Ação:** {row['Ação']}")
-                else:
-                    st.write("Detalhes detalhados não encontrados para este registro.")
-            else:
-                st.success("✅ Nenhuma pendência registrada nesta vistoria.")
+        # Botão de download
+        csv_data = df_hist.to_csv(index=False).encode('utf-8')
+        st.download_button(label="📥 Baixar CSV", data=csv_data, file_name='historico.csv', mime='text/csv')
 
         st.markdown("---")
-        with st.expander("🛠️ Gerenciar Registros (Senha: flats)"):
-            senha = st.text_input("Senha para gerenciar:", type="password")
-            if senha == "flats":
-                df_editor = df_hist.copy()
-                df_editor.insert(0, "Selecionar", False)
-                edicao = st.data_editor(df_editor, hide_index=True, use_container_width=True)
-                
-                col_del1, col_del2 = st.columns(2)
-                with col_del1:
-                    if st.button("🗑️ Apagar Selecionados"):
-                        df_final = edicao[edicao["Selecionar"] == False].drop(columns=["Selecionar"])
+        
+        # 2. ÁREA DE GERENCIAMENTO (ABAIXO DO HISTÓRICO)
+        st.subheader("🛠️ Gerenciar Registros")
+        senha = st.text_input("Para excluir registros, digite a senha:", type="password")
+        
+        if senha == "flats":
+            st.info("Selecione as inspeções que deseja apagar no editor abaixo:")
+            
+            # Prepara o DataFrame com a coluna de checkbox
+            df_editor = df_hist.copy()
+            df_editor.insert(0, "Selecionar", False)
+            
+            # Editor interativo para exclusão
+            tabela_edicao = st.data_editor(
+                df_editor,
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    "Selecionar": st.column_config.CheckboxColumn(
+                        "Apagar?",
+                        help="Marque para excluir este registro",
+                        default=False,
+                    )
+                },
+                disabled=["Data", "Inspetor", "Status"]
+            )
+            
+            col_b1, col_b2 = st.columns(2)
+            with col_b1:
+                if st.button("🗑️ Apagar Selecionados"):
+                    # Filtra os dados: mantém apenas o que NÃO foi marcado para apagar
+                    df_final = tabela_edicao[tabela_edicao["Selecionar"] == False].drop(columns=["Selecionar"])
+                    
+                    if df_final.empty:
+                        if os.path.exists('historico_zelador.csv'):
+                            os.remove('historico_zelador.csv')
+                    else:
                         df_final.to_csv('historico_zelador.csv', index=False)
+                    
+                    st.success("Registros atualizados!")
+                    st.rerun()
+            
+            with col_b2:
+                if st.button("🚨 LIMPAR TODO O HISTÓRICO"):
+                    if os.path.exists('historico_zelador.csv'):
+                        os.remove('historico_zelador.csv')
+                        st.warning("Histórico completamente removido.")
                         st.rerun()
-                with col_del2:
-                    if st.button("🚨 APAGAR TUDO"):
-                        if os.path.exists('historico_zelador.csv'): os.remove('historico_zelador.csv')
-                        if os.path.exists('detalhes_zelador.csv'): os.remove('detalhes_zelador.csv')
-                        st.rerun()
+        
+        elif senha != "":
+            st.error("Senha incorreta!")
+            
     else:
-        st.info("Ainda não existem inspeções registradas.")
+        st.info("Ainda não existem inspeções registradas no histórico.")
