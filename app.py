@@ -159,4 +159,3 @@ with aba_historico:
 
     else:
         st.info("Ainda não existem inspeções registradas no histórico.")
-
