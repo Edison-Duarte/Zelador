@@ -22,10 +22,6 @@ def carregar_historico():
         return pd.read_csv(arquivo)
     return None
 
-def atualizar_arquivo_historico(df):
-    arquivo = 'historico_zelador.csv'
-    df.to_csv(arquivo, index=False)
-
 # --- LÓGICA DE ALERTA SEMANAL ---
 df_hist_verificacao = carregar_historico()
 if df_hist_verificacao is not None and not df_hist_verificacao.empty:
@@ -39,7 +35,7 @@ if df_hist_verificacao is not None and not df_hist_verificacao.empty:
 aba_inspecao, aba_historico = st.tabs(["📋 Nova Inspeção", "📊 Histórico de Inspeções"])
 
 with aba_inspecao:
-    # --- CABEÇALHO VISUAL (BARCO, TIMÃO E PRÉDIOS) ---
+    # --- CABEÇALHO VISUAL ---
     col_v1, col_v2, col_v3 = st.columns([1, 2, 1])
     with col_v2:
         st.markdown("<h1 style='text-align: center; margin-bottom: 0;'>🚢 ☸️</h1>", unsafe_allow_html=True)
@@ -99,13 +95,9 @@ with aba_inspecao:
                 "Status": resumo_status
             }
             salvar_no_historico(dados_para_salvar)
-            
             st.success("Inspeção Concluída e Salva no Histórico!")
             
-            # Gerar texto do relatório
-            relatorio_texto = f"RELATÓRIO DE INSPEÇÃO - ZELADOR\n"
-            relatorio_texto += f"Data: {data_atual}\n"
-            relatorio_texto += f"Responsável: {inspetor}\n"
+            relatorio_texto = f"RELATÓRIO DE INSPEÇÃO - ZELADOR\nData: {data_atual}\nResponsável: {inspetor}\n"
             relatorio_texto += "----------------------------\n"
             
             if nao_conformidades:
@@ -117,7 +109,6 @@ with aba_inspecao:
 
             st.text_area("Prévia do Relatório", relatorio_texto, height=200)
 
-            # --- BOTÕES DE ENVIO ---
             msg_whatsapp = urllib.parse.quote(relatorio_texto)
             url_whatsapp = f"https://api.whatsapp.com/send?text={msg_whatsapp}"
             
@@ -131,46 +122,41 @@ with aba_historico:
     st.title("📊 Histórico de Inspeções")
     df_hist = carregar_historico()
     
-    if df_hist is not None and not df_hist.empty:
+    if df_hist is not None:
         st.dataframe(df_hist, use_container_width=True)
         
-        st.markdown("---")
-        # --- BOTÃO EDITAR COM SENHA ---
-        with st.expander("📝 Editar Histórico (Requer Senha)"):
+        # --- SEÇÃO DE EDIÇÃO/EXCLUSÃO ---
+        with st.expander("🛠️ Gerenciar Histórico (Editar/Apagar)"):
             senha = st.text_input("Digite a senha para habilitar a edição:", type="password")
             
             if senha == "flats":
-                st.success("Acesso liberado!")
+                st.warning("Cuidado: As alterações abaixo são permanentes!")
                 
-                # Opção 1: Apagar registros selecionados
-                st.subheader("Apagar Registros")
-                registros_para_apagar = st.multiselect(
-                    "Selecione as inspeções que deseja remover:",
-                    options=df_hist.index,
-                    format_func=lambda x: f"{df_hist.iloc[x]['Data']} - {df_hist.iloc[x]['Inspetor']}"
-                )
+                opcao_exclusao = st.radio("O que deseja fazer?", ["Manter tudo", "Apagar inspeções selecionadas", "Apagar TUDO"])
                 
-                if st.button("❌ Apagar Selecionados"):
-                    if registros_para_apagar:
-                        df_hist = df_hist.drop(registros_para_apagar)
-                        atualizar_arquivo_historico(df_hist)
-                        st.rerun()
-                    else:
-                        st.warning("Selecione ao menos um item.")
-
-                st.markdown("---")
-                # Opção 2: Apagar tudo
-                st.subheader("Zona de Perigo")
-                if st.button("🚨 APAGAR TODAS AS INSPEÇÕES"):
-                    # Cria um dataframe vazio com as mesmas colunas para "resetar" o arquivo
-                    df_vazio = pd.DataFrame(columns=["Data", "Inspetor", "Status"])
-                    atualizar_arquivo_historico(df_vazio)
-                    st.rerun()
+                if opcao_exclusao == "Apagar inspeções selecionadas":
+                    # Criamos uma lista de índices para o multiselect
+                    indices_para_remover = st.multiselect(
+                        "Selecione as inspeções para remover (pela data/inspetor):",
+                        options=df_hist.index,
+                        format_func=lambda x: f"{df_hist.iloc[x]['Data']} - {df_hist.iloc[x]['Inspetor']}"
+                    )
                     
+                    if st.button("Confirmar Exclusão Selecionada"):
+                        df_novo = df_hist.drop(indices_para_remover)
+                        df_novo.to_csv('historico_zelador.csv', index=False)
+                        st.success("Itens removidos com sucesso! Recarregue a página.")
+                        st.rerun()
+
+                elif opcao_exclusao == "Apagar TUDO":
+                    if st.button("🚨 APAGAR TODO O HISTÓRICO"):
+                        if os.path.exists('historico_zelador.csv'):
+                            os.remove('historico_zelador.csv')
+                            st.success("Histórico limpo com sucesso!")
+                            st.rerun()
             elif senha != "":
                 st.error("Senha incorreta.")
 
-        # Botão de download
         csv_data = df_hist.to_csv(index=False).encode('utf-8')
         st.download_button(
             label="📥 Baixar Histórico Completo (CSV)",
