@@ -116,46 +116,68 @@ with aba_historico:
     df_hist = carregar_historico()
     
     if df_hist is not None:
-        st.write("Abaixo estão as vistorias realizadas anteriormente:")
-        st.dataframe(df_hist, use_container_width=True)
-        
-        # Botão para baixar o CSV
+        # Botão para baixar o CSV (mantido no topo para facilidade)
         csv_data = df_hist.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 Baixar Histórico Completo (CSV)",
-            data=csv_data,
-            file_name='historico_zelador.csv',
-            mime='text/csv',
-        )
+        st.download_button(label="📥 Baixar CSV", data=csv_data, file_name='historico.csv', mime='text/csv')
 
         st.markdown("---")
-        # --- SEÇÃO DE EDIÇÃO/EXCLUSÃO ---
-        with st.expander("🛠️ Gerenciar Histórico (Editar/Apagar)"):
-            senha = st.text_input("Digite a senha para habilitar edições:", type="password")
+        
+        # --- ÁREA DE EDIÇÃO DINÂMICA ---
+        with st.expander("🛠️ Modo de Edição e Exclusão (Senha Necessária)"):
+            senha = st.text_input("Digite a senha para gerenciar:", type="password")
             
             if senha == "flats":
-                st.warning("Área de Gerenciamento Ativada")
+                st.info("Selecione as linhas que deseja remover ou use o checkbox no topo da coluna para marcar todas.")
                 
-                # Opção 1: Apagar uma linha específica
-                st.subheader("Apagar Inspeção Específica")
-                linha_para_apagar = st.number_input("Digite o índice da linha que deseja apagar:", min_value=0, max_value=len(df_hist)-1, step=1)
-                if st.button("🗑️ Apagar Linha Selecionada"):
-                    df_novo_hist = df_hist.drop(df_hist.index[linha_para_apagar])
-                    df_novo_hist.to_csv('historico_zelador.csv', index=False)
-                    st.success(f"Linha {linha_para_apagar} removida com sucesso!")
-                    st.rerun()
-
-                st.markdown("---")
+                # Adiciona uma coluna de seleção temporária
+                df_com_selecao = df_hist.copy()
+                df_com_selecao.insert(0, "Selecionar para Apagar", False)
                 
-                # Opção 2: Apagar Tudo
-                st.subheader("Apagar Tudo")
-                if st.button("🚨 APAGAR TODO O HISTÓRICO"):
-                    if os.path.exists('historico_zelador.csv'):
-                        os.remove('historico_zelador.csv')
-                        st.success("Todo o histórico foi apagado!")
+                # Interface de edição dinâmica
+                edicao = st.data_editor(
+                    df_com_selecao,
+                    hide_index=True,
+                    use_container_width=True,
+                    column_config={
+                        "Selecionar para Apagar": st.column_config.CheckboxColumn(
+                            "❌",
+                            help="Marque para apagar",
+                            default=False,
+                        )
+                    },
+                    disabled=["Data", "Inspetor", "Status"] # Impede editar o conteúdo, apenas o checkbox
+                )
+                
+                # Lógica de Exclusão
+                col_del1, col_del2 = st.columns(2)
+                
+                with col_del1:
+                    if st.button("🗑️ Apagar Selecionados"):
+                        # Filtra apenas o que NÃO foi selecionado
+                        linhas_restantes = edicao[edicao["Selecionar para Apagar"] == False]
+                        # Remove a coluna temporária de seleção antes de salvar
+                        df_final = linhas_restantes.drop(columns=["Selecionar para Apagar"])
+                        
+                        if len(df_final) == 0:
+                            if os.path.exists('historico_zelador.csv'):
+                                os.remove('historico_zelador.csv')
+                        else:
+                            df_final.to_csv('historico_zelador.csv', index=False)
+                        
+                        st.success("Alterações salvas!")
                         st.rerun()
+                
+                with col_del2:
+                    if st.button("🚨 APAGAR TUDO"):
+                        if os.path.exists('historico_zelador.csv'):
+                            os.remove('historico_zelador.csv')
+                            st.rerun()
+
             elif senha != "":
                 st.error("Senha incorreta!")
+            else:
+                # Exibição padrão quando não há senha (apenas leitura)
+                st.dataframe(df_hist, use_container_width=True, hide_index=True)
 
     else:
         st.info("Ainda não existem inspeções registradas no histórico.")
