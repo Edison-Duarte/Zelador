@@ -5,11 +5,11 @@ import urllib.parse
 import os
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Zelador Pro", page_icon="🏢")
+st.set_page_config(page_title="App Zelador", page_icon="🏢")
 
-# --- FUNÇÕES DE HISTÓRICO ---
-def salvar_no_csv(dados):
-    arquivo = 'historico_inspecoes.csv'
+# --- FUNÇÕES DE PERSISTÊNCIA (HISTÓRICO) ---
+def salvar_no_historico(dados):
+    arquivo = 'historico_zelador.csv'
     df_novo = pd.DataFrame([dados])
     if os.path.exists(arquivo):
         df_novo.to_csv(arquivo, mode='a', index=False, header=False)
@@ -17,69 +17,120 @@ def salvar_no_csv(dados):
         df_novo.to_csv(arquivo, index=False)
 
 def carregar_historico():
-    arquivo = 'historico_inspecoes.csv'
+    arquivo = 'historico_zelador.csv'
     if os.path.exists(arquivo):
         return pd.read_csv(arquivo)
     return None
 
 # --- LÓGICA DE ALERTA SEMANAL ---
-hist = carregar_historico()
-if hist is not None and not hist.empty:
-    ultima_data_str = hist['Data'].iloc[-1].split(" ")[0]
+# Verifica a última data no histórico para disparar o alerta
+df_hist_verificacao = carregar_historico()
+if df_hist_verificacao is not None and not df_hist_verificacao.empty:
+    ultima_data_str = df_hist_verificacao['Data'].iloc[-1].split(" ")[0]
     ultima_data = datetime.strptime(ultima_data_str, "%d/%m/%Y")
     dias_passados = (datetime.now() - ultima_data).days
     if dias_passados >= 7:
-        st.error(f"⚠️ ATENÇÃO: A última vistoria foi há {dias_passados} dias!")
+        st.error(f"⚠️ ATENÇÃO: A última vistoria foi realizada há {dias_passados} dias!")
 
 # --- INTERFACE EM ABAS ---
-aba_nova, aba_hist = st.tabs(["📋 Nova Inspeção", "📊 Consultar Histórico"])
+aba_inspecao, aba_historico = st.tabs(["📋 Nova Inspeção", "📊 Histórico de Inspeções"])
 
-with aba_nova:
-    st.title("Inspeção de Áreas Comuns")
-    
-    # 1. Identificação
-    inspetor = st.text_input("Nome do Inspetor:")
+with aba_inspecao:
+    st.title("🏢 Sistema de Inspeção: Zelador")
+    st.markdown("---")
+
+    # --- IDENTIFICAÇÃO ---
+    st.subheader("1. Identificação")
+    inspetor = st.text_input("Nome do Responsável pela Inspeção:")
     data_atual = datetime.now().strftime("%d/%m/%Y %H:%M")
 
-    if inspetor:
-        # 2. Checklist
+    if not inspetor:
+        st.info("Por favor, identifique-se para começar.")
+    else:
+        # --- FORMULÁRIO DE INSPEÇÃO ---
         areas = ["Recepção", "Elevadores", "Escadarias", "Corredores", "Corrimões", "Janelas"]
         blocos = ["Bloco A", "Bloco B"]
         nao_conformidades = []
 
+        st.subheader("2. Checklist de Áreas Comuns")
+
         for bloco in blocos:
-            with st.expander(f"Vistoria {bloco}"):
+            with st.expander(f"📋 Inspeção - {bloco}", expanded=True):
                 for area in areas:
-                    res = st.radio(f"{area} ({bloco})", ["Conforme", "Não Conforme"], key=f"{bloco}_{area}")
-                    if res == "Não Conforme":
-                        acao = st.selectbox(f"Ação para {area}:", ["Limpeza", "Reparo", "Troca"], key=f"ac_{bloco}_{area}")
-                        nao_conformidades.append(f"{bloco}-{area} ({acao})")
+                    col1, col2 = st.columns([2, 3])
+                    with col1:
+                        status = st.radio(f"{area}", ["Conforme", "Não Conforme"], key=f"{bloco}_{area}")
+                    
+                    if status == "Não Conforme":
+                        with col2:
+                            correcao = st.selectbox(
+                                f"Ação corretiva para {area}:",
+                                ["Limpeza imediata", "Reparo técnico", "Troca de componentes", "Sinalizar área"],
+                                key=f"corr_{bloco}_{area}"
+                            )
+                            obs = st.text_input(f"Obs ({area}):", key=f"obs_{bloco}_{area}")
+                            nao_conformidades.append({
+                                "Bloco": bloco,
+                                "Local": area,
+                                "Problema": obs if obs else "Não especificado",
+                                "Ação": correcao
+                            })
 
-        # 3. Finalização
-        if st.button("Finalizar e Enviar"):
-            status_geral = "OK" if not nao_conformidades else f"{len(nao_conformidades)} Pendências"
+        # --- FINALIZAÇÃO ---
+        st.markdown("---")
+        if st.button("Finalizar e Gerar Relatório"):
+            # Salvar no Histórico
+            resumo_status = "OK" if not nao_conformidades else f"{len(nao_conformidades)} Pendências"
+            dados_para_salvar = {
+                "Data": data_atual,
+                "Inspetor": inspetor,
+                "Status": resumo_status
+            }
+            salvar_no_historico(dados_para_salvar)
             
-            # Salvar no histórico
-            dados = {"Data": data_atual, "Inspetor": inspetor, "Resultado": status_geral}
-            salvar_no_csv(dados)
-
-            # Gerar texto para WhatsApp
-            relatorio = f"*RELATÓRIO ZELADOR*\nData: {data_atual}\nInspetor: {inspetor}\nStatus: {status_geral}\n"
+            st.success("Inspeção Concluída e Salva no Histórico!")
+            
+            # Gerar texto do relatório
+            relatorio_texto = f"RELATÓRIO DE INSPEÇÃO - ZELADOR\n"
+            relatorio_texto += f"Data: {data_atual}\n"
+            relatorio_texto += f"Responsável: {inspetor}\n"
+            relatorio_texto += "----------------------------\n"
+            
             if nao_conformidades:
-                relatorio += "\n*Problemas:* " + ", ".join(nao_conformidades)
-            
-            url_wa = f"https://api.whatsapp.com/send?text={urllib.parse.quote(relatorio)}"
-            
-            st.success("Inspeção salva com sucesso!")
-            st.link_button("📲 Enviar via WhatsApp", url_wa)
-    else:
-        st.info("Digite seu nome para iniciar.")
+                relatorio_texto += "🚨 NÃO CONFORMIDADES ENCONTRADAS:\n"
+                for item in nao_conformidades:
+                    relatorio_texto += f"- {item['Bloco']} | {item['Local']}: {item['Problema']} (Ação: {item['Ação']})\n"
+            else:
+                relatorio_texto += "✅ Tudo em conformidade!"
 
-with aba_hist:
-    st.header("Histórico de Vistorias")
-    dados_h = carregar_historico()
-    if dados_h is not None:
-        st.dataframe(dados_h, use_container_width=True)
-    else:
-        st.write("Nenhum registro encontrado.")
+            st.text_area("Prévia do Relatório", relatorio_texto, height=200)
 
+            # --- BOTÕES DE ENVIO ---
+            msg_whatsapp = urllib.parse.quote(relatorio_texto)
+            url_whatsapp = f"https://api.whatsapp.com/send?text={msg_whatsapp}"
+            
+            col_w, col_e = st.columns(2)
+            with col_w:
+                st.link_button("📲 WhatsApp (Escolher Contato)", url_whatsapp)
+            with col_e:
+                st.link_button("📧 Enviar via E-mail", f"mailto:?subject=Relatorio_Zelador&body={msg_whatsapp}")
+
+with aba_historico:
+    st.title("📊 Histórico de Inspeções")
+    df_hist = carregar_historico()
+    
+    if df_hist is not None:
+        st.write("Abaixo estão as vistorias realizadas anteriormente:")
+        # Exibe a tabela do histórico
+        st.dataframe(df_hist, use_container_width=True)
+        
+        # Botão opcional para baixar o CSV
+        csv_data = df_hist.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Baixar Histórico Completo (CSV)",
+            data=csv_data,
+            file_name='historico_zelador.csv',
+            mime='text/csv',
+        )
+    else:
+        st.info("Ainda não existem inspeções registradas no histórico.")
