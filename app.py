@@ -81,15 +81,20 @@ if st.button("Finalizar e Gerar Relatório"):
 
     # --- BOTÕES DE ENVIO ---
     msg_whatsapp = urllib.parse.quote(relatorio_texto)
-    tel_gestor = "5511999999999" # Substitua pelo número real
+    
+    # URL SEM NÚMERO (Abre a lista de contatos do WhatsApp)
+    url_whatsapp_aberta = f"https://api.whatsapp.com/send?text={msg_whatsapp}"
     
     col_w, col_e = st.columns(2)
     
     with col_w:
-        st.markdown(f'[Send to WhatsApp](https://wa.me/{tel_gestor}?text={msg_whatsapp})')
+        # Botão estilizado para o WhatsApp
+        st.link_button("📲 Enviar via WhatsApp (Escolher Contato)", url_whatsapp_aberta)
     
     with col_e:
-        st.markdown(f'[Send by Email](mailto:gestor@condominio.com?subject=Relatorio_Zelador&body={msg_whatsapp})')
+        # Link para E-mail (Opcional: você pode deixar o campo de e-mail vazio para o usuário preencher no app de e-mail)
+        st.link_button("📧 Enviar via E-mail", f"mailto:?subject=Relatorio_Zelador&body={msg_whatsapp}")
     
-    # Atualiza a data da última vistoria
+    # Atualiza a data da última vistoria no sistema
     st.session_state['ultima_vistoria'] = datetime.now()
+
