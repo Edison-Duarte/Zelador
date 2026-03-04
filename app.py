@@ -7,6 +7,10 @@ import os
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="App Zelador", page_icon="🏢")
 
+# Inicializa o estado para o painel de edição não fechar sozinho
+if 'modo_edicao' not in st.session_state:
+    st.session_state.modo_edicao = False
+
 # --- FUNÇÕES DE PERSISTÊNCIA (HISTÓRICO) ---
 def salvar_no_historico(dados):
     arquivo = 'historico_zelador.csv'
@@ -25,11 +29,14 @@ def carregar_historico():
 # --- LÓGICA DE ALERTA SEMANAL ---
 df_hist_verificacao = carregar_historico()
 if df_hist_verificacao is not None and not df_hist_verificacao.empty:
-    ultima_data_str = df_hist_verificacao['Data'].iloc[-1].split(" ")[0]
-    ultima_data = datetime.strptime(ultima_data_str, "%d/%m/%Y")
-    dias_passados = (datetime.now() - ultima_data).days
-    if dias_passados >= 7:
-        st.error(f"⚠️ ATENÇÃO: A última vistoria foi realizada há {dias_passados} dias!")
+    try:
+        ultima_data_str = df_hist_verificacao['Data'].iloc[-1].split(" ")[0]
+        ultima_data = datetime.strptime(ultima_data_str, "%d/%m/%Y")
+        dias_passados = (datetime.now() - ultima_data).days
+        if dias_passados >= 7:
+            st.error(f"⚠️ ATENÇÃO: A última vistoria foi realizada há {dias_passados} dias!")
+    except:
+        pass
 
 # --- INTERFACE EM ABAS ---
 aba_inspecao, aba_historico = st.tabs(["📋 Nova Inspeção", "📊 Histórico de Inspeções"])
@@ -47,7 +54,8 @@ with aba_inspecao:
         st.info("Por favor, identifique-se para começar.")
     else:
         # --- FORMULÁRIO DE INSPEÇÃO ---
-        areas = ["Recepção", "Elevadores", "Escadarias", "Corredores", "Corrimões", "Janelas"]
+        # "Garagens" adicionado conforme solicitado
+        areas = ["Recepção", "Elevadores", "Escadarias", "Corredores", "Corrimões", "Janelas", "Garagens"]
         blocos = ["Bloco A", "Bloco B"]
         nao_conformidades = []
 
@@ -115,47 +123,53 @@ with aba_historico:
     st.title("📊 Histórico de Inspeções")
     df_hist = carregar_historico()
     
-    if df_hist is not None:
+    if df_hist is not None and not df_hist.empty:
         st.write("Abaixo estão as vistorias realizadas anteriormente:")
         st.dataframe(df_hist, use_container_width=True)
         
-        # Botão para baixar o CSV
-        csv_data = df_hist.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 Baixar Histórico Completo (CSV)",
-            data=csv_data,
-            file_name='historico_zelador.csv',
-            mime='text/csv',
-        )
+        # Botões de ação rápida
+        col_down, col_edit = st.columns([3, 1])
+        with col_down:
+            csv_data = df_hist.to_csv(index=False).encode('utf-8')
+            st.download_button("📥 Baixar Histórico (CSV)", csv_data, "historico_zelador.csv", "text/csv")
+        
+        with col_edit:
+            if st.button("🛠️ Editar"):
+                st.session_state.modo_edicao = not st.session_state.modo_edicao
 
-        st.markdown("---")
-        # --- SEÇÃO DE EDIÇÃO/EXCLUSÃO ---
-        with st.expander("🛠️ Gerenciar Histórico (Editar/Apagar)"):
-            senha = st.text_input("Digite a senha para habilitar edições:", type="password")
+        # --- PAINEL DE EDIÇÃO PROTEGIDO ---
+        if st.session_state.modo_edicao:
+            st.markdown("---")
+            st.subheader("⚙️ Gerenciamento de Dados")
+            senha = st.text_input("Digite a senha para habilitar a exclusão:", type="password")
             
             if senha == "flats":
-                st.warning("Área de Gerenciamento Ativada")
+                st.warning("Acesso concedido. Escolha as inspeções que deseja remover.")
                 
-                # Opção 1: Apagar uma linha específica
-                st.subheader("Apagar Inspeção Específica")
-                linha_para_apagar = st.number_input("Digite o índice da linha que deseja apagar:", min_value=0, max_value=len(df_hist)-1, step=1)
-                if st.button("🗑️ Apagar Linha Selecionada"):
-                    df_novo_hist = df_hist.drop(df_hist.index[linha_para_apagar])
-                    df_novo_hist.to_csv('historico_zelador.csv', index=False)
-                    st.success(f"Linha {linha_para_apagar} removida com sucesso!")
-                    st.rerun()
+                # Opção 1: Apagar uma ou mais inspeções
+                opcoes_exclusao = [f"{idx} | {row['Data']} - {row['Inspetor']}" for idx, row in df_hist.iterrows()]
+                selecionados = st.multiselect("Selecione os registros para apagar:", opcoes_exclusao)
+                
+                if st.button("🗑️ Apagar Selecionados"):
+                    if selecionados:
+                        indices = [int(s.split(" | ")[0]) for s in selecionados]
+                        df_novo = df_hist.drop(indices)
+                        df_novo.to_csv('historico_zelador.csv', index=False)
+                        st.success("Registros removidos com sucesso!")
+                        st.session_state.modo_edicao = False
+                        st.rerun()
+                    else:
+                        st.info("Nenhum item selecionado.")
 
                 st.markdown("---")
-                
                 # Opção 2: Apagar Tudo
-                st.subheader("Apagar Tudo")
                 if st.button("🚨 APAGAR TODO O HISTÓRICO"):
                     if os.path.exists('historico_zelador.csv'):
                         os.remove('historico_zelador.csv')
                         st.success("Todo o histórico foi apagado!")
+                        st.session_state.modo_edicao = False
                         st.rerun()
             elif senha != "":
                 st.error("Senha incorreta!")
-
     else:
         st.info("Ainda não existem inspeções registradas no histórico.")
