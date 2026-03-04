@@ -9,14 +9,12 @@ st.set_page_config(page_title="App Zelador", page_icon="🏢")
 
 ARQUIVO = 'historico_zelador.csv'
 
-# --- FUNÇÃO DE CALLBACK PARA LIMPAR ---
+# --- FUNÇÃO DE CALLBACK PARA LIMPAR (SEM RERUN INTERNO) ---
 def resetar_formulario():
-    # Deleta as chaves do session_state. 
-    # O Streamlit recarregará a página sozinho após este callback terminar.
+    # Remove as chaves do estado da sessão para limpar os campos
     for key in list(st.session_state.keys()):
         if key.startswith(('r_', 'o_', 'corr_', 'nome_inspetor')):
             st.session_state.pop(key, None)
-    # st.rerun() REMOVIDO: Desnecessário aqui.
 
 # --- FUNÇÕES DE PERSISTÊNCIA ---
 def salvar_no_historico(dados):
@@ -42,44 +40,54 @@ def carregar_historico():
     except:
         return None
 
-# --- ABAS ---
+# --- INTERFACE EM ABAS ---
 aba_inspecao, aba_historico = st.tabs(["📋 Nova Inspeção", "📊 Histórico"])
 
 with aba_inspecao:
     st.title("🏢 Sistema de Inspeção")
     
-    # Campo de nome
-    inspetor = st.text_input("Nome do Responsável:", key="nome_inspetor")
+    inspetor = st.text_input("👤 Nome do Responsável:", key="nome_inspetor")
     data_atual = datetime.now().strftime("%d/%m/%Y %H:%M")
 
     if not inspetor:
-        st.info("Digite seu nome para iniciar o checklist.")
+        st.info("Por favor, digite seu nome para exibir o checklist.")
     else:
-        areas = ["Recepção", "Elevadores", "Escadarias", "Corredores", "Corrimões", "Janelas", "Garagens"]
+        # Itens com destaque (Negrito e Emojis)
+        itens_checklist = {
+            "🛋️ **Recepção**": "Recepção",
+            "🛗 **Elevadores**": "Elevadores",
+            "🪜 **Escadarias**": "Escadarias",
+            "🛤️ **Corredores**": "Corredores",
+            "🧼 **Corrimões**": "Corrimões",
+            "🪟 **Janelas**": "Janelas",
+            "🚗 **Garagens**": "Garagens"
+        }
+        
         blocos = ["Bloco A", "Bloco B"]
         nao_conformidades = []
 
         for bloco in blocos:
             st.markdown(f"### 📍 {bloco}")
-            for area in areas:
+            for label, area_id in itens_checklist.items():
                 c1, c2 = st.columns([2, 3])
                 with c1:
-                    status = st.radio(f"{area}", ["Conforme", "Não Conforme"], key=f"r_{bloco}_{area}")
+                    # Exibe o nome em destaque
+                    status = st.radio(label, ["Conforme", "Não Conforme"], key=f"r_{bloco}_{area_id}")
                 
                 if status == "Não Conforme":
                     with c2:
                         correcao = st.selectbox(
-                            f"Ação para {area}:",
+                            f"Ação Corretiva ({area_id}):",
                             ["Limpeza imediata", "Reparo técnico", "Troca de componentes", "Sinalizar área"],
-                            key=f"corr_{bloco}_{area}"
+                            key=f"corr_{bloco}_{area_id}"
                         )
-                        obs = st.text_input(f"Obs sobre {area}:", key=f"o_{bloco}_{area}")
+                        obs = st.text_input(f"Observação:", placeholder="Ex: Lâmpada queimada", key=f"o_{bloco}_{area_id}")
                         
-                        detalhe_item = f"[{bloco}-{area}] {obs if obs else 'Pendente'} (Ação: {correcao})"
+                        detalhe_item = f"[{bloco}-{area_id}] {obs if obs else 'Pendente'} (Ação: {correcao})"
                         nao_conformidades.append(detalhe_item.replace(";", "-"))
             st.markdown("---")
 
-        # Botão de salvar
+        # Botão de finalizar
         if st.button("💾 FINALIZAR E SALVAR AGORA"):
             resumo = "OK" if not nao_conformidades else f"{len(nao_conformidades)} Pendências"
             detalhes_csv = " // ".join(nao_conformidades) if nao_conformidades else "Tudo em conformidade"
@@ -89,24 +97,24 @@ with aba_inspecao:
             })
             
             if sucesso:
-                st.success("✅ Inspeção salva!")
+                st.success("✅ Inspeção salva com sucesso!")
                 
-                # Links de compartilhamento
-                relatorio = f"*RELATÓRIO DE INSPEÇÃO*\nData: {data_atual}\nResponsável: {inspetor}\nStatus: {resumo}\n\n"
+                # Relatório formatado para envio
+                relatorio = f"*RELATÓRIO DE INSPEÇÃO*\n📅 Data: {data_atual}\n👤 Responsável: {inspetor}\n📊 Status: {resumo}\n\n"
                 if nao_conformidades:
-                    relatorio += "*DETALHES:*\n" + "\n".join(nao_conformidades)
+                    relatorio += "*PENDÊNCIAS:*\n" + "\n".join(nao_conformidades)
                 
                 texto_url = urllib.parse.quote(relatorio)
                 
-                col_w, col_e = st.columns(2)
-                with col_w:
-                    st.link_button("📲 WhatsApp", f"https://api.whatsapp.com/send?text={texto_url}", use_container_width=True)
-                with col_e:
-                    st.link_button("📧 E-mail", f"mailto:?subject=Inspecao_{data_atual}&body={texto_url}", use_container_width=True)
+                c_w, c_e = st.columns(2)
+                with c_w:
+                    st.link_button("📲 Enviar via WhatsApp", f"https://api.whatsapp.com/send?text={texto_url}", use_container_width=True)
+                with c_e:
+                    st.link_button("📧 Enviar via E-mail", f"mailto:?subject=Relatorio_Zelador&body={texto_url}", use_container_width=True)
                 
                 st.balloons()
                 
-                # Botão de reset usando o Callback corretamente
+                # Botão de Reset (usa o callback automático do Streamlit)
                 st.button("🔄 Iniciar Nova Inspeção (Limpar Campos)", on_click=resetar_formulario)
 
 with aba_historico:
@@ -117,24 +125,22 @@ with aba_historico:
         colunas_vistas = [c for c in ["Data", "Inspetor", "Status"] if c in df_hist.columns]
         st.dataframe(df_hist[colunas_vistas], use_container_width=True)
 
-        # Visualizador de Pendências
         st.markdown("---")
         pendentes = df_hist[df_hist['Status'].str.contains("Pendências", na=False)]
         if not pendentes.empty:
-            st.subheader("🔍 Visualizar Pendências")
+            st.subheader("🔍 Visualizar Detalhes")
             escolha_ver = st.selectbox("Selecione para detalhar:", pendentes.index, 
                                         format_func=lambda x: f"{df_hist.loc[x, 'Data']} - {df_hist.loc[x, 'Inspetor']}")
-            if st.button("👁️ Ver Detalhes"):
+            if st.button("👁️ Ver O que foi pontuado"):
                 st.warning(df_hist.loc[escolha_ver, 'Detalhes'].replace(" // ", "\n"))
 
-        # Opções Avançadas (Excluir registro selecionado)
         with st.expander("🛠️ Opções Avançadas"):
-            senha = st.text_input("Senha:", type="password", key="senha_adm")
+            senha = st.text_input("Senha Adm:", type="password", key="senha_adm")
             if senha == "flats":
                 opcoes_del = df_hist.index.tolist()
-                item_del = st.selectbox("Excluir qual registro?", opcoes_del,
+                item_del = st.selectbox("Qual registro excluir?", opcoes_del,
                                         format_func=lambda x: f"{df_hist.loc[x, 'Data']} | {df_hist.loc[x, 'Inspetor']}")
-                if st.button("Confirmar Exclusão"):
+                if st.button("Excluir Definitivamente"):
                     df_novo = df_hist.drop(item_del)
                     df_novo.to_csv(ARQUIVO, index=False, sep=';')
-                    st.rerun() # Aqui o rerun é válido pois não é um callback!
+                    st.rerun()
