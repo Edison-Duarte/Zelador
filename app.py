@@ -19,7 +19,7 @@ def salvar_no_historico(dados):
             df_novo.to_csv(ARQUIVO, index=False, sep=';')
         return True
     except Exception as e:
-        st.error(f"Erro ao salvar no arquivo: {e}")
+        st.error(f"Erro ao salvar: {e}")
         return False
 
 def carregar_historico():
@@ -33,31 +33,43 @@ def carregar_historico():
     except:
         return None
 
-# --- INTERFACE ---
+# --- INTERFACE EM ABAS ---
 aba_inspecao, aba_historico = st.tabs(["📋 Nova Inspeção", "📊 Histórico"])
 
 with aba_inspecao:
     st.title("🏢 Sistema de Inspeção")
-    inspetor = st.text_input("Nome do Responsável:", key="input_nome")
+    
+    # Campo de nome (inspetor)
+    inspetor = st.text_input("Nome do Responsável:", key="nome_inspetor")
     data_atual = datetime.now().strftime("%d/%m/%Y %H:%M")
 
     if not inspetor:
-        st.info("Digite seu nome para liberar o formulário.")
+        st.info("Digite seu nome para iniciar o checklist.")
     else:
         areas = ["Recepção", "Elevadores", "Escadarias", "Corredores", "Corrimões", "Janelas", "Garagens"]
         blocos = ["Bloco A", "Bloco B"]
         nao_conformidades = []
 
         for bloco in blocos:
-            with st.expander(f"📋 {bloco}", expanded=True):
+            with st.expander(f"📋 Checklist - {bloco}", expanded=True):
                 for area in areas:
                     c1, c2 = st.columns([1, 1])
                     with c1:
+                        # O formulário inicia "em branco" (Conforme) por padrão
                         status = st.radio(f"{area}", ["Conforme", "Não Conforme"], key=f"r_{bloco}_{area}")
+                    
                     if status == "Não Conforme":
                         with c2:
-                            obs = st.text_input(f"Problema em {area}?", key=f"o_{bloco}_{area}")
-                            nao_conformidades.append(f"• {bloco} - {area}: {obs if obs else 'Não detalhado'}")
+                            # Reintrodução das opções de correção anteriores
+                            correcao = st.selectbox(
+                                f"Ação para {area}:",
+                                ["Limpeza imediata", "Reparo técnico", "Troca de componentes", "Sinalizar área"],
+                                key=f"corr_{bloco}_{area}"
+                            )
+                            obs = st.text_input(f"Obs sobre {area}:", key=f"o_{bloco}_{area}")
+                            
+                            detalhe_item = f"[{bloco}-{area}] {obs if obs else 'Pendente'} (Ação: {correcao})"
+                            nao_conformidades.append(detalhe_item.replace(";", "-"))
 
         st.markdown("---")
         
@@ -65,72 +77,79 @@ with aba_inspecao:
             resumo = "OK" if not nao_conformidades else f"{len(nao_conformidades)} Pendências"
             detalhes_csv = " // ".join(nao_conformidades) if nao_conformidades else "Tudo em conformidade"
             
-            sucesso = salvar_no_historico({
+            dados = {
                 "Data": data_atual, 
                 "Inspetor": inspetor, 
                 "Status": resumo, 
                 "Detalhes": detalhes_csv
-            })
+            }
             
-            if sucesso:
-                st.success(f"✅ Inspeção de {inspetor} salva com sucesso!")
+            if salvar_no_historico(dados):
+                st.success("✅ Gravado com sucesso!")
                 
-                # --- MONTAGEM DO TEXTO PARA ENVIO ---
-                texto_relatorio = f"*RELATÓRIO DE INSPEÇÃO*\n\n"
-                texto_relatorio += f"*Data:* {data_atual}\n"
-                texto_relatorio += f"*Responsável:* {inspetor}\n"
-                texto_relatorio += f"*Status:* {resumo}\n\n"
-                
+                # Gerar texto para WhatsApp/Email
+                relatorio = f"*RELATÓRIO DE INSPEÇÃO*\nData: {data_atual}\nResponsável: {inspetor}\nStatus: {resumo}\n\n"
                 if nao_conformidades:
-                    texto_relatorio += "*PENDÊNCIAS ENCONTRADAS:*\n"
-                    for item in nao_conformidades:
-                        texto_relatorio += f"{item}\n"
-                else:
-                    texto_relatorio += "✅ Todas as áreas estão em conformidade."
-
-                # --- BOTÕES DE COMPARTILHAMENTO ---
-                st.markdown("### 📲 Enviar Relatório")
+                    relatorio += "*DETALHES:*\n" + "\n".join(nao_conformidades)
                 
-                # Encode para URL
-                texto_url = urllib.parse.quote(texto_relatorio)
-                url_whatsapp = f"https://api.whatsapp.com/send?text={texto_url}"
-                url_email = f"mailto:?subject=Relatorio de Inspecao {data_atual}&body={texto_url}"
-
-                col_w, col_e = st.columns(2)
-                with col_w:
-                    st.link_button("📲 Enviar via WhatsApp", url_whatsapp, use_container_width=True)
-                with col_e:
-                    st.link_button("📧 Enviar via E-mail", url_email, use_container_width=True)
+                texto_url = urllib.parse.quote(relatorio)
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.link_button("📲 WhatsApp", f"https://api.whatsapp.com/send?text={texto_url}", use_container_width=True)
+                with col2:
+                    st.link_button("📧 E-mail", f"mailto:?subject=Inspecao_{data_atual}&body={texto_url}", use_container_width=True)
                 
                 st.balloons()
+                # Botão para resetar a página e vir o formulário em branco
+                if st.button("Realizar Nova Inspeção"):
+                    st.rerun()
 
 with aba_historico:
     st.title("📊 Histórico")
     df_hist = carregar_historico()
     
     if df_hist is not None and not df_hist.empty:
-        colunas_exibir = [c for c in ["Data", "Inspetor", "Status"] if c in df_hist.columns]
-        st.dataframe(df_hist[colunas_exibir], use_container_width=True)
+        # Exibição da tabela principal
+        colunas_vistas = [c for c in ["Data", "Inspetor", "Status"] if c in df_hist.columns]
+        st.dataframe(df_hist[colunas_vistas], use_container_width=True)
 
+        # Visualizador de Pendências
         st.markdown("---")
-        if "Status" in df_hist.columns and "Detalhes" in df_hist.columns:
-            pendentes = df_hist[df_hist['Status'].str.contains("Pendências", na=False)]
-            if not pendentes.empty:
-                st.subheader("🔍 Detalhes das Pendências")
-                escolha = st.selectbox("Selecione a inspeção:", pendentes.index, 
+        pendentes = df_hist[df_hist['Status'].str.contains("Pendências", na=False)]
+        if not pendentes.empty:
+            st.subheader("🔍 Visualizar Pendências")
+            escolha_ver = st.selectbox("Selecione para detalhar:", pendentes.index, 
                                         format_func=lambda x: f"{df_hist.loc[x, 'Data']} - {df_hist.loc[x, 'Inspetor']}")
-                
-                if st.button("👁️ Abrir Detalhes"):
-                    conteudo = df_hist.loc[escolha, 'Detalhes'].replace(" // ", "\n")
-                    st.warning(f"**Relatório:**\n\n{conteudo}")
-            else:
-                st.info("Nenhuma pendência para detalhar.")
-        
-        # Opção de resetar caso o arquivo corrompa
+            if st.button("👁️ Ver Detalhes"):
+                st.warning(df_hist.loc[escolha_ver, 'Detalhes'].replace(" // ", "\n"))
+
+        # --- OPÇÕES AVANÇADAS (DELETAR ESPECÍFICO) ---
+        st.markdown("---")
         with st.expander("🛠️ Opções Avançadas"):
-            if st.button("🚨 Resetar Histórico"):
-                if os.path.exists(ARQUIVO):
+            senha = st.text_input("Senha de Gerenciamento:", type="password")
+            if senha == "flats":
+                st.subheader("🗑️ Deletar Registro Específico")
+                
+                # Criar lista de opções para o usuário escolher qual deletar
+                opcoes_del = df_hist.index.tolist()
+                item_para_deletar = st.selectbox(
+                    "Qual inspeção deseja excluir?", 
+                    opcoes_del,
+                    format_func=lambda x: f"{df_hist.loc[x, 'Data']} | {df_hist.loc[x, 'Inspetor']}"
+                )
+                
+                if st.button("Excluir Registro Selecionado"):
+                    df_novo = df_hist.drop(item_para_deletar)
+                    df_novo.to_csv(ARQUIVO, index=False, sep=';')
+                    st.success("Registro excluído!")
+                    st.rerun()
+                
+                st.markdown("---")
+                if st.button("🚨 APAGAR TODO O HISTÓRICO"):
                     os.remove(ARQUIVO)
                     st.rerun()
+            elif senha != "":
+                st.error("Senha incorreta")
     else:
-        st.info("Nenhuma inspeção registrada ainda.")
+        st.info("Nenhuma inspeção registrada.")
