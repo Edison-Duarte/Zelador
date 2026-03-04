@@ -9,9 +9,8 @@ st.set_page_config(page_title="App Zelador", page_icon="🏢")
 
 ARQUIVO = 'historico_zelador.csv'
 
-# --- FUNÇÃO DE CALLBACK PARA LIMPAR (SEM RERUN INTERNO) ---
+# --- FUNÇÃO DE CALLBACK PARA LIMPAR ---
 def resetar_formulario():
-    # Remove as chaves do estado da sessão para limpar os campos
     for key in list(st.session_state.keys()):
         if key.startswith(('r_', 'o_', 'corr_', 'nome_inspetor')):
             st.session_state.pop(key, None)
@@ -44,48 +43,45 @@ def carregar_historico():
 aba_inspecao, aba_historico = st.tabs(["📋 Nova Inspeção", "📊 Histórico"])
 
 with aba_inspecao:
-    st.title("🏢 Sistema de Inspeção")
+    st.title("Sistema de Inspeção")
     
-    inspetor = st.text_input("👤 Nome do Responsável:", key="nome_inspetor")
+    inspetor = st.text_input("Nome do Responsável:", key="nome_inspetor")
     data_atual = datetime.now().strftime("%d/%m/%Y %H:%M")
 
     if not inspetor:
         st.info("Por favor, digite seu nome para exibir o checklist.")
     else:
-        # Itens com destaque (Negrito e Emojis)
-        itens_checklist = {
-            "🛋️ **Recepção**": "Recepção",
-            "🛗 **Elevadores**": "Elevadores",
-            "🪜 **Escadarias**": "Escadarias",
-            "🛤️ **Corredores**": "Corredores",
-            "🧼 **Corrimões**": "Corrimões",
-            "🪟 **Janelas**": "Janelas",
-            "🚗 **Garagens**": "Garagens"
-        }
+        # Itens do checklist (sem emojis)
+        itens_checklist = [
+            "Recepção", "Elevadores", "Escadarias", 
+            "Corredores", "Corrimões", "Janelas", "Garagens"
+        ]
         
         blocos = ["Bloco A", "Bloco B"]
         nao_conformidades = []
 
         for bloco in blocos:
-            st.markdown(f"### 📍 {bloco}")
-            for label, area_id in itens_checklist.items():
+            st.markdown(f"## 📍 {bloco}")
+            for area in itens_checklist:
+                # Aumentando o tamanho da fonte usando HTML/Markdown
+                st.markdown(f"<p style='font-size:22px; font-weight:bold; margin-bottom:-10px;'>{area}</p>", unsafe_allow_html=True)
+                
                 c1, c2 = st.columns([2, 3])
                 with c1:
-                    # Exibe o nome em destaque
-                    status = st.radio(label, ["Conforme", "Não Conforme"], key=f"r_{bloco}_{area_id}")
+                    status = st.radio(f"Status {area}", ["Conforme", "Não Conforme"], key=f"r_{bloco}_{area}", label_visibility="collapsed")
                 
                 if status == "Não Conforme":
                     with c2:
                         correcao = st.selectbox(
-                            f"Ação Corretiva ({area_id}):",
+                            f"Ação Corretiva ({area}):",
                             ["Limpeza imediata", "Reparo técnico", "Troca de componentes", "Sinalizar área"],
-                            key=f"corr_{bloco}_{area_id}"
+                            key=f"corr_{bloco}_{area}"
                         )
-                        obs = st.text_input(f"Observação:", placeholder="Ex: Lâmpada queimada", key=f"o_{bloco}_{area_id}")
+                        obs = st.text_input(f"Observação:", placeholder="Descreva o problema", key=f"o_{bloco}_{area}")
                         
-                        detalhe_item = f"[{bloco}-{area_id}] {obs if obs else 'Pendente'} (Ação: {correcao})"
+                        detalhe_item = f"[{bloco}-{area}] {obs if obs else 'Pendente'} (Ação: {correcao})"
                         nao_conformidades.append(detalhe_item.replace(";", "-"))
-            st.markdown("---")
+                st.markdown("---")
 
         # Botão de finalizar
         if st.button("💾 FINALIZAR E SALVAR AGORA"):
@@ -99,8 +95,7 @@ with aba_inspecao:
             if sucesso:
                 st.success("✅ Inspeção salva com sucesso!")
                 
-                # Relatório formatado para envio
-                relatorio = f"*RELATÓRIO DE INSPEÇÃO*\n📅 Data: {data_atual}\n👤 Responsável: {inspetor}\n📊 Status: {resumo}\n\n"
+                relatorio = f"*RELATÓRIO DE INSPEÇÃO*\nData: {data_atual}\nResponsável: {inspetor}\nStatus: {resumo}\n\n"
                 if nao_conformidades:
                     relatorio += "*PENDÊNCIAS:*\n" + "\n".join(nao_conformidades)
                 
@@ -113,8 +108,6 @@ with aba_inspecao:
                     st.link_button("📧 Enviar via E-mail", f"mailto:?subject=Relatorio_Zelador&body={texto_url}", use_container_width=True)
                 
                 st.balloons()
-                
-                # Botão de Reset (usa o callback automático do Streamlit)
                 st.button("🔄 Iniciar Nova Inspeção (Limpar Campos)", on_click=resetar_formulario)
 
 with aba_historico:
