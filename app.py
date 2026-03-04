@@ -22,7 +22,11 @@ def salvar_no_historico(dados):
 def carregar_historico():
     arquivo = 'historico_zelador.csv'
     if os.path.exists(arquivo):
-        return pd.read_csv(arquivo)
+        df = pd.read_csv(arquivo)
+        # CORREÇÃO DO ERRO: Se a coluna Detalhes não existir no arquivo antigo, cria ela vazia
+        if 'Detalhes' not in df.columns:
+            df['Detalhes'] = "Sem detalhes (registro antigo)"
+        return df
     return None
 
 # --- INTERFACE EM ABAS ---
@@ -30,72 +34,83 @@ aba_inspecao, aba_historico = st.tabs(["📋 Nova Inspeção", "📊 Histórico 
 
 with aba_inspecao:
     st.title("🏢 Sistema de Inspeção: Zelador")
-    inspetor = st.text_input("Nome do Responsável:")
+    inspetor = st.text_input("Nome do Responsável pela Inspeção:")
     data_atual = datetime.now().strftime("%d/%m/%Y %H:%M")
 
     if not inspetor:
-        st.info("Por favor, identifique-se.")
+        st.info("Por favor, identifique-se para começar.")
     else:
+        # Itens atualizados incluindo Garagens
         areas = ["Recepção", "Elevadores", "Escadarias", "Corredores", "Corrimões", "Janelas", "Garagens"]
         blocos = ["Bloco A", "Bloco B"]
         nao_conformidades = []
 
+        st.subheader("2. Checklist de Áreas Comuns")
+
         for bloco in blocos:
-            with st.expander(f"📋 {bloco}", expanded=True):
+            with st.expander(f"📋 Inspeção - {bloco}", expanded=True):
                 for area in areas:
                     col1, col2 = st.columns([2, 3])
                     with col1:
                         status = st.radio(f"{area}", ["Conforme", "Não Conforme"], key=f"{bloco}_{area}")
+                    
                     if status == "Não Conforme":
                         with col2:
-                            correcao = st.selectbox("Ação:", ["Limpeza", "Reparo", "Troca", "Sinalizar"], key=f"c_{bloco}_{area}")
-                            obs = st.text_input("Obs:", key=f"o_{bloco}_{area}")
-                            nao_conformidades.append(f"[{bloco}-{area}] {obs} (Ação: {correcao})")
+                            correcao = st.selectbox(
+                                f"Ação para {area}:",
+                                ["Limpeza imediata", "Reparo técnico", "Troca de componentes", "Sinalizar área"],
+                                key=f"corr_{bloco}_{area}"
+                            )
+                            obs = st.text_input(f"Obs ({area}):", key=f"obs_{bloco}_{area}")
+                            nao_conformidades.append(f"[{bloco}-{area}] {obs if obs else 'Não especificado'} (Ação: {correcao})")
 
-        if st.button("Finalizar"):
-            detalhes = " | ".join(nao_conformidades) if nao_conformidades else "Tudo em ordem"
-            resumo = "OK" if not nao_conformidades else f"{len(nao_conformidades)} Pendências"
+        st.markdown("---")
+        if st.button("Finalizar e Salvar"):
+            resumo_status = "OK" if not nao_conformidades else f"{len(nao_conformidades)} Pendências"
+            texto_detalhes = " | ".join(nao_conformidades) if nao_conformidades else "Tudo em conformidade"
             
-            salvar_no_historico({
+            dados_para_salvar = {
                 "Data": data_atual,
                 "Inspetor": inspetor,
-                "Status": resumo,
-                "Detalhes": detalhes  # Nova coluna para salvar o texto dos erros
-            })
-            st.success("Inspeção Salva!")
+                "Status": resumo_status,
+                "Detalhes": texto_detalhes
+            }
+            salvar_no_historico(dados_para_salvar)
+            st.success("Inspeção Concluída!")
             st.rerun()
 
 with aba_historico:
-    st.title("📊 Histórico")
+    st.title("📊 Histórico de Inspeções")
     df_hist = carregar_historico()
     
     if df_hist is not None:
-        # Exibimos apenas as colunas principais na tabela principal
+        # Exibe a tabela sem a coluna de detalhes (para ficar limpo)
         st.dataframe(df_hist[["Data", "Inspetor", "Status"]], use_container_width=True)
         
-        st.subheader("🔍 Ver Detalhes das Pendências")
-        # Filtramos apenas as linhas que possuem pendências para mostrar no seletor
-        pendentes = df_hist[df_hist['Status'] != "OK"]
+        st.markdown("---")
+        st.subheader("🔍 Visualizar Detalhes das Pendências")
+        
+        # Filtra apenas quem tem pendências
+        pendentes = df_hist[df_hist['Status'].str.contains("Pendências", na=False)]
         
         if not pendentes.empty:
-            escolha = st.selectbox("Selecione uma inspeção para ver os detalhes:", 
-                                    pendentes.index, 
-                                    format_func=lambda x: f"{df_hist.loc[x, 'Data']} - {df_hist.loc[x, 'Inspetor']}")
+            escolha = st.selectbox(
+                "Selecione a inspeção para ver o que foi pontuado:",
+                pendentes.index,
+                format_func=lambda x: f"{df_hist.loc[x, 'Data']} - {df_hist.loc[x, 'Inspetor']}"
+            )
             
-            if st.button("👁️ Visualizar Pendências"):
+            if st.button("👁️ Mostrar Detalhes"):
                 conteudo = df_hist.loc[escolha, 'Detalhes'].replace(" | ", "\n")
-                st.info(f"**Relatório de Problemas:**\n\n{conteudo}")
+                st.warning(f"**Pendências encontradas:**\n\n{conteudo}")
         else:
-            st.write("Nenhuma pendência registrada nos últimos relatórios.")
+            st.info("Não há pendências detalhadas para exibir.")
 
-        # --- BOTÃO EDITAR (Oculto em expander para limpar a tela) ---
-        with st.expander("🛠️ Gerenciar Dados"):
-            if st.button("Ativar Modo Edição"):
-                st.session_state.modo_edicao = not st.session_state.modo_edicao
-            
-            if st.session_state.modo_edicao:
-                senha = st.text_input("Senha:", type="password")
-                if senha == "flats":
-                    if st.button("🚨 APAGAR TUDO"):
-                        if os.path.exists('historico_zelador.csv'): os.remove('historico_zelador.csv')
+        # --- SEÇÃO DE GERENCIAMENTO (APAGAR) ---
+        with st.expander("🛠️ Gerenciar Histórico"):
+            senha = st.text_input("Senha:", type="password")
+            if senha == "flats":
+                if st.button("🚨 APAGAR TUDO"):
+                    if os.path.exists('historico_zelador.csv'):
+                        os.remove('historico_zelador.csv')
                         st.rerun()
