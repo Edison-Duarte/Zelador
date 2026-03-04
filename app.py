@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-import urllib.parse
 import os
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
@@ -10,92 +9,121 @@ st.set_page_config(page_title="App Zelador", page_icon="🏢")
 if 'modo_edicao' not in st.session_state:
     st.session_state.modo_edicao = False
 
+ARQUIVO = 'historico_zelador.csv'
+
 # --- FUNÇÕES DE PERSISTÊNCIA ---
 def salvar_no_historico(dados):
-    arquivo = 'historico_zelador.csv'
     df_novo = pd.DataFrame([dados])
-    if os.path.exists(arquivo):
-        df_novo.to_csv(arquivo, mode='a', index=False, header=False)
+    # Usamos sep=';' para evitar conflito com vírgulas digitadas no texto
+    if os.path.exists(ARQUIVO):
+        df_novo.to_csv(ARQUIVO, mode='a', index=False, header=False, sep=';')
     else:
-        df_novo.to_csv(arquivo, index=False)
+        df_novo.to_csv(ARQUIVO, index=False, sep=';')
 
 def carregar_historico():
-    arquivo = 'historico_zelador.csv'
-    if os.path.exists(arquivo):
-        return pd.read_csv(arquivo)
-    return None
+    if not os.path.exists(ARQUIVO):
+        return None
+    
+    try:
+        # Tenta ler com ponto-e-vírgula (padrão novo)
+        df = pd.read_csv(ARQUIVO, sep=';', on_bad_lines='skip', encoding='utf-8')
+    except:
+        try:
+            # Se falhar, tenta ler com vírgula (padrão antigo)
+            df = pd.read_csv(ARQUIVO, sep=',', on_bad_lines='skip', encoding='utf-8')
+        except:
+            return "CORROMPIDO"
+
+    # Garante que as colunas essenciais existam para não dar erro de exibição
+    colunas = ["Data", "Inspetor", "Status", "Detalhes"]
+    for col in colunas:
+        if col not in df.columns:
+            df[col] = "N/A"
+    return df
 
 # --- INTERFACE EM ABAS ---
 aba_inspecao, aba_historico = st.tabs(["📋 Nova Inspeção", "📊 Histórico de Inspeções"])
 
 with aba_inspecao:
-    st.title("🏢 Sistema de Inspeção: Zelador")
-    inspetor = st.text_input("Nome do Responsável:")
+    st.title("🏢 Sistema de Inspeção")
+    inspetor = st.text_input("Nome do Responsável pela Inspeção:")
     data_atual = datetime.now().strftime("%d/%m/%Y %H:%M")
 
     if not inspetor:
-        st.info("Por favor, identifique-se.")
+        st.info("Por favor, identifique-se para começar.")
     else:
+        # Itens atualizados com Garagens
         areas = ["Recepção", "Elevadores", "Escadarias", "Corredores", "Corrimões", "Janelas", "Garagens"]
         blocos = ["Bloco A", "Bloco B"]
         nao_conformidades = []
 
         for bloco in blocos:
-            with st.expander(f"📋 {bloco}", expanded=True):
+            with st.expander(f"📋 Inspeção - {bloco}", expanded=True):
                 for area in areas:
                     col1, col2 = st.columns([2, 3])
                     with col1:
                         status = st.radio(f"{area}", ["Conforme", "Não Conforme"], key=f"{bloco}_{area}")
+                    
                     if status == "Não Conforme":
                         with col2:
-                            correcao = st.selectbox("Ação:", ["Limpeza", "Reparo", "Troca", "Sinalizar"], key=f"c_{bloco}_{area}")
-                            obs = st.text_input("Obs:", key=f"o_{bloco}_{area}")
-                            nao_conformidades.append(f"[{bloco}-{area}] {obs} (Ação: {correcao})")
+                            correcao = st.selectbox(
+                                f"Ação para {area}:",
+                                ["Limpeza imediata", "Reparo técnico", "Troca de componentes", "Sinalizar área"],
+                                key=f"corr_{bloco}_{area}"
+                            )
+                            obs = st.text_input(f"Obs ({area}):", key=f"obs_{bloco}_{area}")
+                            # Limpeza de caracteres que quebram CSV
+                            obs_limpa = (obs if obs else "Pendente").replace(";", "-").replace("\n", " ")
+                            nao_conformidades.append(f"[{bloco}-{area}] {obs_limpa} (Ação: {correcao})")
 
-        if st.button("Finalizar"):
-            detalhes = " | ".join(nao_conformidades) if nao_conformidades else "Tudo em ordem"
-            resumo = "OK" if not nao_conformidades else f"{len(nao_conformidades)} Pendências"
+        if st.button("Finalizar e Salvar"):
+            resumo_status = "OK" if not nao_conformidades else f"{len(nao_conformidades)} Pendências"
+            texto_detalhes = " / ".join(nao_conformidades) if nao_conformidades else "Tudo em conformidade"
             
             salvar_no_historico({
-                "Data": data_atual,
-                "Inspetor": inspetor,
-                "Status": resumo,
-                "Detalhes": detalhes  # Nova coluna para salvar o texto dos erros
+                "Data": data_atual, 
+                "Inspetor": inspetor, 
+                "Status": resumo_status, 
+                "Detalhes": texto_detalhes
             })
-            st.success("Inspeção Salva!")
+            st.success("Inspeção Concluída!")
             st.rerun()
 
 with aba_historico:
-    st.title("📊 Histórico")
+    st.title("📊 Histórico de Inspeções")
     df_hist = carregar_historico()
     
-    if df_hist is not None:
-        # Exibimos apenas as colunas principais na tabela principal
+    if df_hist is "CORROMPIDO":
+        st.error("O arquivo de histórico está corrompido devido à mudança de formato.")
+        if st.button("🚨 Resetar Arquivo Corrompido"):
+            if os.path.exists(ARQUIVO): os.remove(ARQUIVO)
+            st.rerun()
+    elif df_hist is not None and not df_hist.empty:
+        # Exibição segura da tabela
         st.dataframe(df_hist[["Data", "Inspetor", "Status"]], use_container_width=True)
         
-        st.subheader("🔍 Ver Detalhes das Pendências")
-        # Filtramos apenas as linhas que possuem pendências para mostrar no seletor
-        pendentes = df_hist[df_hist['Status'] != "OK"]
+        st.markdown("---")
+        st.subheader("🔍 Detalhes das Pendências")
+        
+        # Filtra apenas quem tem pendências para o seletor
+        pendentes = df_hist[df_hist['Status'].str.contains("Pendências", na=False)]
         
         if not pendentes.empty:
-            escolha = st.selectbox("Selecione uma inspeção para ver os detalhes:", 
+            escolha = st.selectbox("Selecione a inspeção para ver os detalhes:", 
                                     pendentes.index, 
                                     format_func=lambda x: f"{df_hist.loc[x, 'Data']} - {df_hist.loc[x, 'Inspetor']}")
             
-            if st.button("👁️ Visualizar Pendências"):
-                conteudo = df_hist.loc[escolha, 'Detalhes'].replace(" | ", "\n")
-                st.info(f"**Relatório de Problemas:**\n\n{conteudo}")
+            if st.button("👁️ Mostrar Pendências"):
+                conteudo = df_hist.loc[escolha, 'Detalhes'].replace(" / ", "\n")
+                st.warning(f"**Relatório de Problemas:**\n\n{conteudo}")
         else:
-            st.write("Nenhuma pendência registrada nos últimos relatórios.")
+            st.info("Nenhuma pendência detalhada para exibir.")
 
-        # --- BOTÃO EDITAR (Oculto em expander para limpar a tela) ---
-        with st.expander("🛠️ Gerenciar Dados"):
-            if st.button("Ativar Modo Edição"):
-                st.session_state.modo_edicao = not st.session_state.modo_edicao
-            
-            if st.session_state.modo_edicao:
-                senha = st.text_input("Senha:", type="password")
-                if senha == "flats":
-                    if st.button("🚨 APAGAR TUDO"):
-                        if os.path.exists('historico_zelador.csv'): os.remove('historico_zelador.csv')
-                        st.rerun()
+        with st.expander("🛠️ Gerenciar Histórico"):
+            senha = st.text_input("Senha:", type="password")
+            if senha == "flats":
+                if st.button("🚨 APAGAR TODO O HISTÓRICO"):
+                    if os.path.exists(ARQUIVO): os.remove(ARQUIVO)
+                    st.rerun()
+    else:
+        st.info("Ainda não existem inspeções registradas.")
