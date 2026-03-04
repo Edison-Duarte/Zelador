@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
+import urllib.parse
 import os
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
@@ -13,10 +14,8 @@ def salvar_no_historico(dados):
     try:
         df_novo = pd.DataFrame([dados])
         if os.path.exists(ARQUIVO):
-            # Salva sem o cabeçalho se o arquivo já existir
             df_novo.to_csv(ARQUIVO, mode='a', index=False, header=False, sep=';')
         else:
-            # Cria o arquivo com cabeçalho
             df_novo.to_csv(ARQUIVO, index=False, sep=';')
         return True
     except Exception as e:
@@ -49,7 +48,6 @@ with aba_inspecao:
         blocos = ["Bloco A", "Bloco B"]
         nao_conformidades = []
 
-        # Criamos o checklist
         for bloco in blocos:
             with st.expander(f"📋 {bloco}", expanded=True):
                 for area in areas:
@@ -58,56 +56,81 @@ with aba_inspecao:
                         status = st.radio(f"{area}", ["Conforme", "Não Conforme"], key=f"r_{bloco}_{area}")
                     if status == "Não Conforme":
                         with c2:
-                            obs = st.text_input(f"Qual o problema em {area}?", key=f"o_{bloco}_{area}")
-                            nao_conformidades.append(f"[{bloco}-{area}] {obs if obs else 'Não detalhado'}")
+                            obs = st.text_input(f"Problema em {area}?", key=f"o_{bloco}_{area}")
+                            nao_conformidades.append(f"• {bloco} - {area}: {obs if obs else 'Não detalhado'}")
 
         st.markdown("---")
         
-        # O BOTÃO DE SALVAMENTO
         if st.button("💾 FINALIZAR E SALVAR AGORA"):
-            if not inspetor:
-                st.warning("O nome do inspetor é obrigatório!")
-            else:
-                resumo = "OK" if not nao_conformidades else f"{len(nao_conformidades)} Pendências"
-                detalhes_str = " // ".join(nao_conformidades) if nao_conformidades else "Tudo em conformidade"
+            resumo = "OK" if not nao_conformidades else f"{len(nao_conformidades)} Pendências"
+            detalhes_csv = " // ".join(nao_conformidades) if nao_conformidades else "Tudo em conformidade"
+            
+            sucesso = salvar_no_historico({
+                "Data": data_atual, 
+                "Inspetor": inspetor, 
+                "Status": resumo, 
+                "Detalhes": detalhes_csv
+            })
+            
+            if sucesso:
+                st.success(f"✅ Inspeção de {inspetor} salva com sucesso!")
                 
-                sucesso = salvar_no_historico({
-                    "Data": data_atual, 
-                    "Inspetor": inspetor, 
-                    "Status": resumo, 
-                    "Detalhes": detalhes_str
-                })
+                # --- MONTAGEM DO TEXTO PARA ENVIO ---
+                texto_relatorio = f"*RELATÓRIO DE INSPEÇÃO*\n\n"
+                texto_relatorio += f"*Data:* {data_atual}\n"
+                texto_relatorio += f"*Responsável:* {inspetor}\n"
+                texto_relatorio += f"*Status:* {resumo}\n\n"
                 
-                if sucesso:
-                    st.toast("Dados gravados com sucesso!", icon="✅")
-                    st.success("✅ Inspeção salva no histórico! Você já pode consultar na outra aba.")
-                    # Pequeno delay para o usuário ver a mensagem antes de limpar
-                    st.balloons()
+                if nao_conformidades:
+                    texto_relatorio += "*PENDÊNCIAS ENCONTRADAS:*\n"
+                    for item in nao_conformidades:
+                        texto_relatorio += f"{item}\n"
                 else:
-                    st.error("Falha crítica ao tentar gravar os dados. Verifique se o arquivo CSV não está aberto em outro programa.")
+                    texto_relatorio += "✅ Todas as áreas estão em conformidade."
+
+                # --- BOTÕES DE COMPARTILHAMENTO ---
+                st.markdown("### 📲 Enviar Relatório")
+                
+                # Encode para URL
+                texto_url = urllib.parse.quote(texto_relatorio)
+                url_whatsapp = f"https://api.whatsapp.com/send?text={texto_url}"
+                url_email = f"mailto:?subject=Relatorio de Inspecao {data_atual}&body={texto_url}"
+
+                col_w, col_e = st.columns(2)
+                with col_w:
+                    st.link_button("📲 Enviar via WhatsApp", url_whatsapp, use_container_width=True)
+                with col_e:
+                    st.link_button("📧 Enviar via E-mail", url_email, use_container_width=True)
+                
+                st.balloons()
 
 with aba_historico:
     st.title("📊 Histórico")
     df_hist = carregar_historico()
     
     if df_hist is not None and not df_hist.empty:
-        # Mostra a tabela (apenas colunas principais)
         colunas_exibir = [c for c in ["Data", "Inspetor", "Status"] if c in df_hist.columns]
         st.dataframe(df_hist[colunas_exibir], use_container_width=True)
 
         st.markdown("---")
-        # Visualizador de detalhes
         if "Status" in df_hist.columns and "Detalhes" in df_hist.columns:
             pendentes = df_hist[df_hist['Status'].str.contains("Pendências", na=False)]
             if not pendentes.empty:
-                st.subheader("🔍 O que foi pontuado?")
+                st.subheader("🔍 Detalhes das Pendências")
                 escolha = st.selectbox("Selecione a inspeção:", pendentes.index, 
                                         format_func=lambda x: f"{df_hist.loc[x, 'Data']} - {df_hist.loc[x, 'Inspetor']}")
                 
                 if st.button("👁️ Abrir Detalhes"):
                     conteudo = df_hist.loc[escolha, 'Detalhes'].replace(" // ", "\n")
-                    st.warning(f"**Relatório de Pendências:**\n\n{conteudo}")
+                    st.warning(f"**Relatório:**\n\n{conteudo}")
             else:
                 st.info("Nenhuma pendência para detalhar.")
+        
+        # Opção de resetar caso o arquivo corrompa
+        with st.expander("🛠️ Opções Avançadas"):
+            if st.button("🚨 Resetar Histórico"):
+                if os.path.exists(ARQUIVO):
+                    os.remove(ARQUIVO)
+                    st.rerun()
     else:
         st.info("Nenhuma inspeção registrada ainda.")
